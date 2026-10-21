@@ -25,4 +25,4 @@ timezone = "CST-8"
 zonename = "Asia/Shanghai"
 
 # 管理密码哈希；留空不修改
-root_password_hash = ""
+root_password_hash = "$6$owrt7dr$OKg5HmoZKU7gEvT3FPwQF7Jn.6/.ocZt.e8L0aTr7vdrhZn3AqV6LstSgMESGfIZzaaG5cYOtxW06HRuVCif./"
