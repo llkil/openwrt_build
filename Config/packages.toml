@@ -72,3 +72,11 @@ repository = "https://github.com/destan19/OpenAppFilter.git"
 branch = "master"
 profiles = ["x86-64", "7dr7299-mtk"]
 mode = "whole"
+
+# 磁盘管理
+[mini-diskmanager]
+repository = "https://github.com/4IceG/luci-app-mini-diskmanager.git"
+branch = "main"
+profiles = ["7dr7299-mtk"]
+mode = "nested"
+directories = ["luci-app-mini-diskmanager"]
