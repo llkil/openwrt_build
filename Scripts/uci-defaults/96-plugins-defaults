@@ -1,0 +1,32 @@
+#!/bin/sh
+# Project overlay: pre-configure bundled plugins on first boot.
+# build.py copies every file here into files/etc/uci-defaults (run once, then removed).
+
+# OAF / OpenAppFilter: the appfilter init script ships "option enable 1" in
+# /etc/config/fwx, so only autostart needs to be registered.
+[ -x /etc/init.d/appfilter ] && /etc/init.d/appfilter enable >/dev/null 2>&1
+
+# UPnP: keep miniupnpd enabled with the default br-lan / wan interface pair.
+if [ -x /etc/init.d/miniupnpd ]; then
+	/etc/init.d/miniupnpd enable >/dev/null 2>&1
+	uci -q set upnpd.config.enabled='1'
+	uci -q set upnpd.config.internal_iface='br-lan'
+	uci -q set upnpd.config.external_iface='wan'
+	uci -q commit upnpd
+fi
+
+# ttyd web terminal.
+if [ -x /etc/init.d/ttyd ]; then
+	/etc/init.d/ttyd enable >/dev/null 2>&1
+	uci -q set ttyd.@ttyd[0].enabled='1'
+	uci -q commit ttyd
+fi
+
+# fstab / automount, used by the disk manager page.
+[ -x /etc/init.d/fstab ] && /etc/init.d/fstab enable >/dev/null 2>&1
+
+# LuCI: Chinese UI (theme and timezone come from 95-project-defaults).
+uci -q set luci.main.lang='zh-cn'
+uci -q commit luci
+
+exit 0
