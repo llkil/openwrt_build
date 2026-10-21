@@ -14,18 +14,12 @@ branch = "main"
 profiles = ["all"]
 mode = "whole"
 
-# 旧版 LuCI 的广告过滤界面
-[luci-app-adguardhome]
-repository = "https://github.com/w9315273/luci-app-adguardhome.git"
-commit = "27853f3e1a831c9fd0380c166f68c7e0e0b9736f"
-profiles = ["7dr7299-mtk"]
-mode = "whole"
 
 # 代理界面
 [passwall]
 repository = "https://github.com/Openwrt-Passwall/openwrt-passwall.git"
 branch = "main"
-profiles = ["s20p-mt76", "s20p-mtk", "x86-64", "7dr7299-mt76", "7dr7299-mtk"]
+profiles = ["s20p-mt76", "s20p-mtk", "x86-64", "7dr7299-mt76"]
 mode = "nested"
 directories = ["luci-app-passwall"]
 
@@ -33,23 +27,17 @@ directories = ["luci-app-passwall"]
 [daed]
 repository = "https://github.com/kenzok8/small.git"
 branch = "master"
-profiles = ["s20p-mt76", "s20p-mtk", "x86-64", "7dr7299-mt76", "7dr7299-mtk"]
+profiles = ["s20p-mt76", "s20p-mtk", "x86-64", "7dr7299-mt76"]
 mode = "nested"
 directories = ["dae", "daed", "luci-app-daede", "v2ray-geodata"]
 
 # 旧版源码的独立代理编译器，不替换上游 Go
-[golang-daed]
-repository = "https://github.com/immortalwrt/packages.git"
-commit = "25ad600a90980bed1ee76a212f9a5e42b499bb62"
-profiles = ["7dr7299-mtk"]
-mode = "golang-toolchain"
-version = "1.27"
 
 # 异地组网
 [easytier]
 repository = "https://github.com/EasyTier/luci-app-easytier.git"
 branch = "main"
-profiles = ["s20p-mt76", "s20p-mtk", "x86-64", "7dr7299-mt76", "7dr7299-mtk"]
+profiles = ["s20p-mt76", "s20p-mtk", "x86-64", "7dr7299-mt76"]
 mode = "whole"
 
 # 无线组网
@@ -63,7 +51,7 @@ mode = "mesh"
 [honk]
 repository = "https://github.com/189160/luci-app-honk.git"
 commit = "5643dc570baf158b65d0bf7342afd6e15ab305fc"
-profiles = ["s20p-mt76", "s20p-mtk", "x86-64", "7dr7299-mt76", "7dr7299-mtk"]
+profiles = ["s20p-mt76", "s20p-mtk", "x86-64", "7dr7299-mt76"]
 mode = "honk"
 
 # 应用过滤
@@ -73,3 +61,11 @@ branch = "master"
 profiles = ["x86-64", "7dr7299-mtk"]
 mode = "whole"
 
+
+# 磁盘管理
+[mini-diskmanager]
+repository = "https://github.com/4IceG/luci-app-mini-diskmanager.git"
+branch = "main"
+profiles = ["7dr7299-mtk"]
+mode = "nested"
+directories = ["luci-app-mini-diskmanager"]
