@@ -70,5 +70,5 @@ mode = "honk"
 [oaf]
 repository = "https://github.com/destan19/OpenAppFilter.git"
 branch = "master"
-profiles = ["x86-64"]
+profiles = ["x86-64", "7dr7299-mtk"]
 mode = "whole"
