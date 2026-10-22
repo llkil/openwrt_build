@@ -19,7 +19,7 @@ mode = "whole"
 [passwall]
 repository = "https://github.com/Openwrt-Passwall/openwrt-passwall.git"
 branch = "main"
-profiles = ["s20p-mt76", "s20p-mtk", "x86-64", "7dr7299-mt76"]
+profiles = ["s20p-mt76", "s20p-mtk", "x86-64", "7dr7299-mt76", "7dr7299-mtk"]
 mode = "nested"
 directories = ["luci-app-passwall"]
 
