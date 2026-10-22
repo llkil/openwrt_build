@@ -52,7 +52,7 @@ mode = "mesh"
 [honk]
 repository = "https://github.com/189160/luci-app-honk.git"
 commit = "5643dc570baf158b65d0bf7342afd6e15ab305fc"
-profiles = ["s20p-mt76", "s20p-mtk", "x86-64", "7dr7299-mt76"]
+profiles = ["s20p-mt76", "s20p-mtk", "x86-64", "7dr7299-mt76", "7dr7299-mtk"]
 mode = "honk"
 
 # 应用过滤
