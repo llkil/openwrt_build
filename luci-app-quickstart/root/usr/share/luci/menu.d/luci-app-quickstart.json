@@ -1,7 +1,7 @@
 {
-	"admin/quickstart/overview": {
+	"admin/status/quickstart": {
 		"title": "快速设置",
-		"order": 10,
+		"order": 1,
 		"action": {
 			"type": "view",
 			"path": "quickstart/overview"
