@@ -121,6 +121,7 @@ required = [
   "PACKAGE_datconf-lua",
   "PACKAGE_lua-cjson",
   "PACKAGE_wireless-tools",
+  "PACKAGE_luci-app-quickstart",
 ]
 
 # 固件必需包
@@ -155,6 +156,7 @@ required_image_packages = [
   "datconf-lua",
   "lua-cjson",
   "wireless-tools",
+  "luci-app-quickstart",
 ]
 
 # 固件禁用包
