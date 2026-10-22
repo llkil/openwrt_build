@@ -78,3 +78,11 @@ branch = "master"
 profiles = ["7dr7299-mtk"]
 mode = "nested"
 directories = ["v2ray-geodata"]
+
+# 快速设置首页（只读总览，本仓库自带）
+[quickstart]
+repository = "https://github.com/llkil/openwrt_build.git"
+branch = "main"
+profiles = ["7dr7299-mtk"]
+mode = "nested"
+directories = ["luci-app-quickstart"]
