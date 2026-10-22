@@ -70,3 +70,11 @@ branch = "main"
 profiles = ["7dr7299-mtk"]
 mode = "nested"
 directories = ["luci-app-mini-diskmanager"]
+
+# 地理数据包（easytier / passwall 依赖，独立于 daed）
+[v2ray-geodata]
+repository = "https://github.com/kenzok8/small.git"
+branch = "master"
+profiles = ["7dr7299-mtk"]
+mode = "nested"
+directories = ["v2ray-geodata"]
