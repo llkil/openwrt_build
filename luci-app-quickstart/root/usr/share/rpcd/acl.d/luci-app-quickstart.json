@@ -1,0 +1,15 @@
+{
+	"luci-app-quickstart": {
+		"description": "Grant read-only access to the Quick Start overview",
+		"read": {
+			"ubus": {
+				"system": [ "board", "info" ],
+				"network.interface": [ "dump" ],
+				"iwinfo": [ "devices", "info", "assoclist" ],
+				"service": [ "list" ],
+				"luci": [ "getMountPoints" ]
+			},
+			"uci": [ "network", "wireless", "mtwifi" ]
+		}
+	}
+}
