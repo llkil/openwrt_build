@@ -9,7 +9,10 @@
 				"service": [ "list" ],
 				"luci": [ "getMountPoints" ]
 			},
-			"uci": [ "network", "wireless", "mtwifi" ]
+			"uci": [ "network", "wireless", "mtwifi" ],
+			"file": {
+				"/proc/cpuinfo": [ "read" ]
+			}
 		}
 	}
 }
