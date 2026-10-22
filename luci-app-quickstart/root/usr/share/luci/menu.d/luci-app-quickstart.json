@@ -1,0 +1,13 @@
+{
+	"admin/quickstart/overview": {
+		"title": "快速设置",
+		"order": 10,
+		"action": {
+			"type": "view",
+			"path": "quickstart/overview"
+		},
+		"depends": {
+			"acl": [ "luci-app-quickstart" ]
+		}
+	}
+}
