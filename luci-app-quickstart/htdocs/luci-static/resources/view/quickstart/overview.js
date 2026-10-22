@@ -1,15 +1,14 @@
 'use strict';
 'require view';
 'require rpc';
+'require fs';
 
 /*
- * Quick Start - read-only dashboard.
+ * iStore-style start page (read-only).
  *
- * Design rules:
- *  - No fs.exec, no uci writes, no ubus setters. Every action is a link
- *    to the canonical LuCI page, so this view can never break the device.
- *  - Every rpc call goes through L.resolveDefault(), a missing backend
- *    degrades to "-" instead of a JS exception.
+ * Same contract as v1: no fs.exec, no uci writes, no ubus setters.
+ * Every rpc result goes through L.resolveDefault(), so a missing backend
+ * degrades a single tile instead of blanking the page.
  */
 
 var callBoard = rpc.declare({ object: 'system', method: 'board' });
@@ -21,20 +20,25 @@ var callAssoc = rpc.declare({ object: 'iwinfo', method: 'assoclist', params: [ '
 var callServices = rpc.declare({ object: 'service', method: 'list', params: [ 'name' ], expect: { '': {} } });
 var callMounts = rpc.declare({ object: 'luci', method: 'getMountPoints' });
 
-/* LuCI 页面路由，只放已确认存在的三个，避免点出 404 */
-var LINKS = [
-	{ service: 'passwall',  label: 'PassWall', url: 'admin/services/passwall' },
-	{ service: 'ttyd',      label: 'ttyd 终端', url: 'admin/services/ttyd' },
-	{ service: 'miniupnpd', label: 'UPnP', url: 'admin/services/upnp' }
+var APPS = [
+	{ icon: '🛰', name: 'PassWall', service: 'passwall', url: 'admin/services/passwall' },
+	{ icon: '🕳', name: 'honk', service: 'honk', url: null },
+	{ icon: '🛡', name: '应用过滤', service: 'appfilter', url: null },
+	{ icon: '⌨', name: '终端', service: 'ttyd', url: 'admin/services/ttyd' },
+	{ icon: '🔌', name: 'UPnP', service: 'miniupnpd', url: 'admin/services/upnp' },
+	{ icon: '⚙', name: '系统设置', service: null, url: 'admin/system/system' }
 ];
 
-var WATCH = [
-	{ service: 'passwall',  label: 'PassWall 透明代理' },
-	{ service: 'honk',      label: 'honk 代理核心' },
-	{ service: 'appfilter', label: 'OAF 应用过滤' },
-	{ service: 'ttyd',      label: 'ttyd 终端' },
-	{ service: 'miniupnpd', label: 'UPnP 端口映射' }
-];
+function injectCss() {
+	if (document.querySelector('link[data-qs-style]'))
+		return;
+
+	document.head.appendChild(E('link', {
+		'rel': 'stylesheet',
+		'href': L.resource('view/quickstart/overview.css'),
+		'data-qs-style': '1'
+	}));
+}
 
 function bytes(n) {
 	if (n == null || isNaN(n))
@@ -58,91 +62,95 @@ function duration(sec) {
 	    h = Math.floor(sec % 86400 / 3600),
 	    m = Math.floor(sec % 3600 / 60);
 
-	return (d > 0 ? d + ' 天 ' : '') + h + ' 小时 ' + m + ' 分';
+	return (d > 0 ? d + '天 ' : '') + h + '小时 ' + m + '分';
 }
 
-function bar(used, total) {
-	if (!total)
-		return E('span', {}, '—');
+function tint(percent) {
+	return percent >= 85 ? '#c25b56' : (percent >= 65 ? '#d99b3d' : '#4a9e5c');
+}
 
-	var percent = Math.min(100, Math.round(used / total * 100));
+function ring(percent, value, label, sub) {
+	var safe = Math.max(0, Math.min(100, percent || 0)),
+	    radius = 30,
+	    circumference = 2 * Math.PI * radius,
+	    offset = circumference * (1 - safe / 100);
 
-	return E('span', {}, [
-		E('span', { 'style': 'display:inline-block;width:120px;height:8px;background:var(--border-color-medium,rgba(127,127,127,.3));border-radius:4px;overflow:hidden;vertical-align:middle;margin-right:8px' },
-			E('span', { 'style': 'display:block;height:100%;width:%d%%;background:%s'.format(percent, percent > 85 ? '#d9534f' : (percent > 65 ? '#e8a33d' : '#4a9e5c')) })),
-		E('span', {}, '%d%% (%s / %s)'.format(percent, bytes(used), bytes(total)))
+	return E('div', { 'class': 'qs-metric' }, [
+		E('svg', { 'width': '78', 'height': '78', 'viewBox': '0 0 78 78' }, [
+			E('circle', { 'cx': '39', 'cy': '39', 'r': String(radius), 'fill': 'none',
+				'stroke': 'currentColor', 'stroke-opacity': '.14', 'stroke-width': '7' }),
+			E('circle', { 'cx': '39', 'cy': '39', 'r': String(radius), 'fill': 'none',
+				'stroke': tint(safe), 'stroke-width': '7', 'stroke-linecap': 'round',
+				'stroke-dasharray': String(circumference), 'stroke-dashoffset': String(offset),
+				'transform': 'rotate(-90 39 39)' }),
+			E('text', { 'x': '39', 'y': '43', 'text-anchor': 'middle',
+				'font-size': '14', 'font-weight': '600', 'fill': 'currentColor' }, Math.round(safe) + '%')
+		]),
+		E('div', { 'class': 'qs-metric-text' }, [
+			E('strong', {}, value),
+			E('span', {}, label),
+			sub ? E('em', {}, sub) : ''
+		])
 	]);
 }
 
-function card(title, rows, hint) {
-	return E('div', { 'class': 'cbi-section' }, [
-		E('h3', {}, title),
-		E('div', { 'class': 'cbi-section-node' },
-			E('table', { 'class': 'table' },
-				E('tbody', {}, rows))),
-		hint ? E('p', { 'style': 'opacity:.65;font-size:90%;margin:.4rem 0 0' }, hint) : ''
+function kv(label, value) {
+	return E('div', { 'class': 'qs-kv' }, [
+		E('span', {}, label),
+		E('span', {}, value)
 	]);
 }
 
-function row(label, value) {
-	return E('tr', { 'class': 'tr' }, [
-		E('td', { 'class': 'td', 'style': 'width:32%;white-space:nowrap;opacity:.8' }, label),
-		E('td', { 'class': 'td' }, value)
+function card(title, count, body) {
+	return E('section', { 'class': 'qs-card' }, [
+		E('header', {}, [
+			E('span', {}, title),
+			E('span', { 'class': 'qs-count' }, count || '')
+		]),
+		E('div', {}, body)
 	]);
 }
 
-function interfaceRow(iface, label) {
-	if (!iface)
-		return row(label, E('em', {}, '未配置'));
+function serviceState(services, name) {
+	var entry = services ? services[name] : null;
 
-	var addresses = [];
+	if (!entry || !entry.instances)
+		return null;
 
-	(iface['ipv4-address'] || []).forEach(function(entry) {
-		addresses.push(entry.address + '/' + entry.mask);
+	var running = false;
+
+	Object.keys(entry.instances).forEach(function(key) {
+		if (entry.instances[key].running)
+			running = true;
 	});
 
-	(iface['ipv6-address'] || []).forEach(function(entry) {
-		if (entry.address && entry.address.indexOf('fe80') !== 0)
-			addresses.push(entry.address + '/' + entry.mask);
-	});
-
-	var state = iface.up ? '已连接' : '未连接';
-
-	return row(label, E('span', {}, [
-		E('strong', {}, state),
-		addresses.length ? E('span', {}, ' · ' + addresses.join(', ')) : '',
-		iface.device ? E('span', { 'style': 'opacity:.65' }, ' · ' + iface.device + (iface.proto ? ' (' + iface.proto + ')' : '')) : ''
-	]));
+	return running;
 }
 
-function serviceRow(entry, services) {
-	var state = services[entry.service],
-	    running = false,
-	    enabled = false;
+function interfaceSummary(ifaces, name) {
+	var found = ifaces.filter(function(iface) { return iface.interface === name; })[0];
 
-	if (state && state.instances) {
-		Object.keys(state.instances).forEach(function(name) {
-			var instance = state.instances[name];
-			if (instance.running)
-				running = true;
-			if (instance.enabled)
-				enabled = true;
+	if (!found)
+		return { state: '未配置', detail: '' };
+
+	var address = '';
+
+	(found['ipv4-address'] || []).forEach(function(entry) {
+		if (!address)
+			address = entry.address + '/' + entry.mask;
+	});
+
+	if (!address) {
+		(found['ipv6-address'] || []).forEach(function(entry) {
+			if (!address && entry.address && entry.address.indexOf('fe80') !== 0)
+				address = entry.address + '/' + entry.mask;
 		});
 	}
 
-	var badge = E('span', {
-		'style': 'display:inline-block;padding:1px 8px;border-radius:10px;font-size:85%;' +
-		         (running ? 'background:rgba(74,158,92,.15);color:#3d8a4d' : 'background:rgba(127,127,127,.15);opacity:.8')
-	}, running ? '运行中' : (state ? '已停止' : '未安装'));
-
-	var cells = [ E('td', { 'class': 'td' }, entry.label), E('td', { 'class': 'td' }, badge) ];
-
-	var link = LINKS.find(function(item) { return item.service === entry.service; });
-
-	cells.push(E('td', { 'class': 'td', 'style': 'text-align:right' },
-		(link && state) ? E('a', { 'class': 'btn cbi-button cbi-button-apply', 'href': L.url(link.url) }, '进入') : ''));
-
-	return E('tr', { 'class': 'tr' }, cells);
+	return {
+		state: found.up ? '已连接' : '未连接',
+		detail: address + (found.device ? ' · ' + found.device : '') + (found.proto ? ' · ' + found.proto : '')
+	};
 }
 
 return view.extend({
@@ -153,7 +161,8 @@ return view.extend({
 			L.resolveDefault(callIfaces(), {}),
 			L.resolveDefault(callDevices(), []),
 			L.resolveDefault(callServices(), {}),
-			L.resolveDefault(callMounts(), [])
+			L.resolveDefault(callMounts(), []),
+			L.resolveDefault(fs.read('/proc/cpuinfo'), '')
 		]).then(function(result) {
 			var devices = Array.isArray(result[3]) ? result[3] : [];
 
@@ -172,73 +181,121 @@ return view.extend({
 	},
 
 	render: function(result) {
+		injectCss();
+
 		var board = result[0] || {},
 		    info = result[1] || {},
 		    ifaces = (result[2] || {}).interface || [],
 		    services = result[4] || {},
 		    mounts = Array.isArray(result[5]) ? result[5] : [],
-		    wifi = result[6] || [];
+		    cpuinfo = result[6] || '',
+		    wifi = result[7] || [];
 
 		var release = board.release || {},
 		    memory = info.memory || {},
-		    used = (memory.total && memory.available != null) ? (memory.total - memory.available) : null;
+		    load = info.load || [],
+		    cores = (cpuinfo.match(/^processor\s*:/gm) || []).length || 1;
 
-		var byName = {};
-
-		ifaces.forEach(function(iface) {
-			if (iface.interface)
-				byName[iface.interface] = iface;
-		});
-
-		var wan = byName.wan || byName.wan6 || null,
-		    lan = byName.lan || null;
+		var usedMem = (memory.total && memory.available != null) ? memory.total - memory.available : null;
+		var memPercent = (usedMem && memory.total) ? usedMem / memory.total * 100 : 0;
+		var loadPercent = load.length ? load[0] / cores * 100 : 0;
 
 		var rootMount = mounts.filter(function(mount) {
-			return mount.mount_point === '/overlay' || mount.mount_point === '/';
+			return mount.mount_point === '/overlay';
+		})[0] || mounts.filter(function(mount) {
+			return mount.mount_point === '/';
 		})[0] || null;
+
+		var diskPercent = (rootMount && rootMount.size) ? (rootMount.used || 0) / rootMount.size * 100 : 0;
+
+		var wan = interfaceSummary(ifaces, 'wan'),
+		    wan6 = interfaceSummary(ifaces, 'wan6'),
+		    lan = interfaceSummary(ifaces, 'lan');
 
 		var wifiRows = wifi.map(function(entry) {
 			var w = entry.info || {},
 			    clients = (entry.assoc && entry.assoc.results) ? entry.assoc.results.length : null;
 
-			return row(entry.device,
-				E('span', {}, [
-					E('strong', {}, w.ssid || '—'),
-					w.channel ? E('span', {}, ' · 信道 ' + w.channel + (w.frequency ? ' (' + w.frequency + ' MHz)' : '')) : '',
-					(w.txpower != null) ? E('span', { 'style': 'opacity:.65' }, ' · ' + w.txpower + ' dBm') : '',
-					(clients != null) ? E('span', { 'style': 'opacity:.65' }, ' · ' + clients + ' 个客户端') : ''
-				]));
+			return kv(entry.device,
+				(w.ssid || '—') +
+				(w.channel ? ' · ' + w.channel + 'ch' : '') +
+				(w.frequency ? ' · ' + w.frequency + 'M' : '') +
+				(clients != null ? ' · ' + clients + '台' : ''));
 		});
 
 		if (!wifiRows.length)
-			wifiRows = [ row('无线', E('em', {}, '未检测到无线接口')) ];
+			wifiRows = [ kv('无线', '未检测到射频') ];
 
-		return E('div', {}, [
-			E('h2', {}, '快速设置'),
-			E('p', { 'style': 'opacity:.7;margin-top:-.4rem' },
-				'只读总览。需要修改请点对应卡片里的入口，这里不会写入任何配置。'),
+		var wifiClients = 0;
 
-			card('系统', [
-				row('设备型号', board.model || '—'),
-				row('固件版本', release.description || release.version || '—'),
-				row('内核 / 架构', (board.kernel || '—') + ' / ' + (board.system || '—')),
-				row('主机名', board.hostname || '—'),
-				row('运行时长', duration(info.uptime)),
-				row('负载 (1/5/15 分钟)', (info.load || []).map(function(n) { return n.toFixed(2); }).join(' / ') || '—'),
-				row('内存占用', bar(used, memory.total)),
-				rootMount ? row('存储 ' + rootMount.mount_point, bar(rootMount.used || 0, rootMount.size || 0)) : ''
+		wifi.forEach(function(entry) {
+			if (entry.assoc && entry.assoc.results)
+				wifiClients += entry.assoc.results.length;
+		});
+
+		var apps = APPS.map(function(app) {
+			var running = app.service ? serviceState(services, app.service) : true,
+			    disabled = (running === null);
+
+			var body = [
+				E('div', { 'class': 'qs-app-icon' }, [
+					E('span', {}, app.icon),
+					app.service ? E('i', { 'class': 'qs-status' + (running === true ? '' : ' stop') }) : ''
+				]),
+				E('div', { 'class': 'qs-app-name' }, app.name)
+			];
+
+			if (app.url && !disabled)
+				return E('a', { 'class': 'qs-app', 'href': L.url(app.url) }, body);
+
+			return E('div', { 'class': 'qs-app' + (disabled ? ' off' : ''), 'title': disabled ? '未安装' : '' }, body);
+		});
+
+		return E('div', { 'class': 'qs' }, [
+			E('div', { 'class': 'qs-hero' }, [
+				E('div', { 'class': 'qs-hero-icon' }, '🛰'),
+				E('div', { 'class': 'qs-hero-main' }, [
+					E('h2', {}, board.model || 'OpenWrt'),
+					E('p', { 'class': 'qs-hero-sub' },
+						(release.description || release.version || '') +
+						' · 内核 ' + (board.kernel || '—') +
+						' · 已运行 ' + duration(info.uptime))
+				]),
+				E('span', { 'class': 'qs-pill' }, [
+					E('i', { 'class': 'qs-dot' + (wan.state === '已连接' ? '' : ' off') }),
+					wan.state === '已连接' ? '外网已连接' : '外网未连接'
+				])
 			]),
 
-			card('网络', [
-				interfaceRow(wan, 'WAN'),
-				interfaceRow(lan, 'LAN')
-			], '详细配置见 网络 → 接口。'),
+			E('div', { 'class': 'qs-metrics' }, [
+				ring(loadPercent, load.length ? load[0].toFixed(2) : '—', 'CPU 负载', cores + ' 核 · 1 分钟'),
+				ring(memPercent, bytes(usedMem), '内存占用', bytes(memory.total)),
+				ring(diskPercent, bytes(rootMount ? rootMount.used : null), '存储占用',
+					rootMount ? bytes(rootMount.size) + ' 可用' : '—')
+			]),
 
-			card('无线', wifiRows, '本机为闭源 MTK 驱动，此处只读取 iwinfo 结果，不提供修改入口；改无线请用 网络 → 无线。'),
+			E('div', { 'class': 'qs-grid' }, [
+				card('网络', wan.state, [
+					kv('WAN', wan.state),
+					kv('WAN 地址', wan.detail || '—'),
+					kv('IPv6', wan6.detail || wan6.state),
+					kv('LAN', lan.detail || lan.state)
+				]),
+				card('无线', wifiClients + ' 台在线', wifiRows)
+			]),
 
-			card('插件状态', WATCH.map(function(entry) {
-				return serviceRow(entry, services);
-			}), '显示的是服务实例状态；装了但未启用的会显示“已停止”。')
+			E('div', { 'class': 'qs-grid' }, [
+				card('应用', '', [ E('div', { 'class': 'qs-apps' }, apps) ]),
+				card('系统', '', [
+					kv('固件', release.distribution ? release.distribution + ' ' + (release.version || '') : (release.description || '—')),
+					kv('内核', board.kernel || '—'),
+					kv('架构', board.system || '—'),
+					kv('主机名', board.hostname || '—'),
+					kv('负载 5/15', load.length > 1 ? load[1].toFixed(2) + ' / ' + load[2].toFixed(2) : '—')
+				])
+			]),
+
+			E('p', { 'class': 'qs-foot' }, '只读总览 · 修改请进入对应页面')
 		]);
 	},
 
