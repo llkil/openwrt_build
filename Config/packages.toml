@@ -35,10 +35,9 @@ directories = ["dae", "daed", "luci-app-daede", "v2ray-geodata"]
 # 旧版源码的独立代理编译器，不替换上游 Go
 
 # 异地组网
-[easytier]
 repository = "https://github.com/EasyTier/luci-app-easytier.git"
 branch = "main"
-profiles = ["s20p-mt76", "s20p-mtk", "x86-64", "7dr7299-mt76"]
+profiles = ["s20p-mt76", "s20p-mtk", "x86-64", "7dr7299-mt76, "7dr7299-mtk"]]
 mode = "whole"
 
 # 无线组网
