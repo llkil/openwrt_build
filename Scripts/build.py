@@ -175,6 +175,7 @@ def validate_config(profile_id, profile, content, selections=None):
     if values.get("PACKAGE_luci-app-passwall") == "y":
         # Fail closed if upstream adds a new, enabled proxy backend.
         allowed = {"PACKAGE_luci-app-passwall_INCLUDE_Xray", "PACKAGE_luci-app-passwall_INCLUDE_Geoview",
+                   "PACKAGE_luci-app-passwall_INCLUDE_V2ray_Geoview",
                    "PACKAGE_luci-app-passwall_INCLUDE_V2ray_Geodata"}
         forbidden.update(key for key in values if key.startswith("PACKAGE_luci-app-passwall_INCLUDE_") and key not in allowed)
     errors += ["Forbidden CONFIG_" + key for key in sorted(forbidden) if values.get(key) in ("y", "m")]
