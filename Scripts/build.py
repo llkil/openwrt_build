@@ -427,7 +427,7 @@ def integrate(lock, tree):
             for directory in dirs:
                 if not (clone / directory / "Makefile").is_file():
                     raise ValueError(name + ": missing recipe " + directory)
-            names = package.get("remove") or ([name] if dirs == ["."] else dirs)
+            names = package.get("remove") or ([name] if dirs == ["."] else [Path(d).name for d in dirs])
             remove_packages(tree, names)
             if mode == "whole":
                 destination = tree / "package/custom" / name
@@ -435,7 +435,10 @@ def integrate(lock, tree):
                 shutil.copytree(clone, destination, ignore=shutil.ignore_patterns(".git", ".github"))
             else:
                 for directory in dirs:
-                    shutil.copytree(clone / directory, tree / "package" / directory, ignore=shutil.ignore_patterns(".git", ".github"))
+                    # Recipes may be addressed by a feed-relative path; the recipe
+                    # name is its last component and that is where it must land.
+                    shutil.copytree(clone / directory, tree / "package" / Path(directory).name,
+                                    ignore=shutil.ignore_patterns(".git", ".github"))
     if "golang-daed" in lock["packages"]:
         use_daed_go_toolchain(tree, lock["packages"]["golang-daed"]["version"])
     if "luci-app-adguardhome" in lock["packages"]:
@@ -953,7 +956,7 @@ def release_notes(lock, identity=None, config_name="Config-*.txt"):
         notes += "\n> 仅适用于 TP-Link TL-7DR7299 v1。MT76 / MTK 的引导器及分区布局需分别核对，不保证直接互刷。"
         notes += "sysupgrade.itb 用于匹配布局的 OpenWrt 升级；recovery.itb 为恢复镜像，不是原厂首次刷入包；不发布引导器。"
         if profile["variant"] == "mtk-vendor":
-            notes += "闭源版不集成 Mesh / DAWN；daed / honk 默认关闭，启用前验证 HNAT / WARP 兼容性。"
+            notes += "闭源版不集成 Mesh / DAWN / daed / honk；OAF 已集成但默认不启动，启用前验证 HNAT / WARP 兼容性。"
         notes += "\n"
     notes += "\n<details>\n<summary>源码与文件</summary>\n\n"
     notes += "源码：[" + source["branch"] + " · " + source["commit"][:7] + "](" + repository + "/commit/" + source["commit"] + ")。\n\n"
