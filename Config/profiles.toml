@@ -121,6 +121,30 @@ required = [
   "PACKAGE_datconf-lua",
   "PACKAGE_lua-cjson",
   "PACKAGE_wireless-tools",
+  # 磁盘管理（分区 / 格式化 / 挂载）
+  "PACKAGE_block-mount",
+  "PACKAGE_parted",
+  "PACKAGE_e2fsprogs",
+  "PACKAGE_resize2fs",
+  "PACKAGE_tune2fs",
+  "PACKAGE_dosfstools",
+  "PACKAGE_kmod-fs-ext4",
+  "PACKAGE_kmod-fs-vfat",
+  "PACKAGE_kmod-fs-exfat",
+  "PACKAGE_kmod-fs-ntfs3",
+  "PACKAGE_kmod-fs-xfs",
+  "PACKAGE_kmod-nls-cp437",
+  "PACKAGE_kmod-nls-utf8",
+  "PACKAGE_luci-app-mini-diskmanager",
+  # 应用过滤（界面硬依赖 appfilter + kmod-oaf，无法拆分）
+  "PACKAGE_luci-app-oaf",
+  "PACKAGE_appfilter",
+  "PACKAGE_kmod-oaf",
+  "PACKAGE_luci-i18n-oaf-zh-cn",
+  # UPnP
+  "PACKAGE_luci-app-upnp",
+  "PACKAGE_luci-i18n-upnp-zh-cn",
+  "PACKAGE_miniupnpd-nftables",
 ]
 
 # 固件必需包
@@ -155,6 +179,27 @@ required_image_packages = [
   "datconf-lua",
   "lua-cjson",
   "wireless-tools",
+  "block-mount",
+  "parted",
+  "e2fsprogs",
+  "resize2fs",
+  "tune2fs",
+  "dosfstools",
+  "kmod-fs-ext4",
+  "kmod-fs-vfat",
+  "kmod-fs-exfat",
+  "kmod-fs-ntfs3",
+  "kmod-fs-xfs",
+  "kmod-nls-cp437",
+  "kmod-nls-utf8",
+  "luci-app-mini-diskmanager",
+  "luci-app-oaf",
+  "appfilter",
+  "kmod-oaf",
+  "luci-i18n-oaf-zh-cn",
+  "luci-app-upnp",
+  "luci-i18n-upnp-zh-cn",
+  "miniupnpd-nftables",
 ]
 
 # 固件禁用包
@@ -167,6 +212,11 @@ forbidden_image_packages = [
   "mtwifi-cfg-ucode",
   "kmod-mt_wifi",
   "kmod-conninfra",
+  "honk",
+  "luci-app-honk",
+  "luci-i18n-honk-zh-cn",
+  "daed",
+  "luci-app-daede",
 ]
 
 # 禁用配置
@@ -181,6 +231,12 @@ forbidden = [
   "PACKAGE_kmod-conninfra",
   "PACKAGE_wifi-profile",
   "PACKAGE_luci-app-mtk",
+  "PACKAGE_honk",
+  "PACKAGE_luci-app-honk",
+  "PACKAGE_luci-i18n-honk-zh-cn",
+  "PACKAGE_daed",
+  "PACKAGE_dae",
+  "PACKAGE_luci-app-daede",
 ]
 
 # 内核补充项
