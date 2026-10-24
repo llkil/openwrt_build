@@ -15,13 +15,16 @@
 
 | 机型 | 特性与插件 | 源码 |
 | :--- | :--- | :--- |
+| x86-64 | BBR · BIOS / UEFI / VMDK<br>PassWall（Xray-only）· daed / honk · EasyTier · AdGuard Home | [VIKINGYFY / owrt](https://github.com/VIKINGYFY/immortalwrt/tree/owrt) |
+| TL-7DR7299 · MT76 | 开源无线 · Mesh / DAWN · BBR / fq<br>PassWall（Xray-only）· daed / honk · EasyTier · AdGuard Home | [VIKINGYFY / owrt](https://github.com/VIKINGYFY/immortalwrt/tree/owrt) |
+| TL-7DR7299 · MTK | 闭源无线 · HNAT / WARP · TurboACC / eQoS<br>PassWall（Xray-only）· daed / honk · EasyTier · AdGuard Home | [padavanonly / 6.6-mtwifi](https://github.com/padavanonly/immortalwrt-mt798x-6.6/tree/mt798x-mt799x-6.6-mtwifi) |
 | Xiaomi BE6500 | ath12k · PPE · Mesh / DAWN · BBR / fq | [VIKINGYFY / owrt](https://github.com/VIKINGYFY/immortalwrt/tree/owrt) |
 | Tenda BE12 Pro | MT76 · Mesh / DAWN · BBR / fq | [VIKINGYFY / owrt](https://github.com/VIKINGYFY/immortalwrt/tree/owrt) |
 | 超级网关S20P · MT76 | 开源无线 · Mesh · BBR / fq<br>PassWall（Xray-only）· daed / honk · EasyTier · AdGuard Home | [VIKINGYFY / owrt](https://github.com/VIKINGYFY/immortalwrt/tree/owrt) |
 | 超级网关S20P · MTK | 闭源无线 · HNAT / WARP · TurboACC / eQoS<br>PassWall（Xray-only）· daed / honk · EasyTier · AdGuard Home | [chasey-dev / 25.12](https://github.com/chasey-dev/immortalwrt-mt798x-rebase/tree/25.12) |
-| TL-7DR7299 · MT76 | 开源无线 · Mesh / DAWN · BBR / fq<br>PassWall（Xray-only）· daed / honk · EasyTier · AdGuard Home | [VIKINGYFY / owrt](https://github.com/VIKINGYFY/immortalwrt/tree/owrt) |
-| TL-7DR7299 · MTK | 闭源无线 · HNAT / WARP · TurboACC / eQoS<br>PassWall（Xray-only）· OAF · UPnP / 磁盘管理 · EasyTier · AdGuard Home | [padavanonly / 6.6-mtwifi](https://github.com/padavanonly/immortalwrt-mt798x-6.6/tree/mt798x-mt799x-6.6-mtwifi) |
-| x86-64 | BBR · BIOS / UEFI / VMDK<br>PassWall（Xray-only）· daed / honk · EasyTier · AdGuard Home | [VIKINGYFY / owrt](https://github.com/VIKINGYFY/immortalwrt/tree/owrt) |
+| 京东云无线宝赵云 · JDCloud RE-CS-06 | ath12k · PPE · Mesh / DAWN · BBR / fq<br>PassWall（Xray-only）· daed / honk · EasyTier · AdGuard Home | [VIKINGYFY / owrt](https://github.com/VIKINGYFY/immortalwrt/tree/owrt) |
+
+> 赵云（构建选项 `jdcloud-re-cs-06`）使用 LZMA/FIT 内核，保留上游 7 MiB 内核区域与 eMMC 布局，刷入前请确认引导器兼容。
 
 ## 默认设置
 
@@ -44,7 +47,7 @@
 | 固件发布 | 同一工作流内默认发布成功机型的 Release；可通过 `publish=false` 关闭 |
 | 版本标识 | LuCI 固件版本显示仓库所有者、北京时间（编译开始）；镜像文件名带机型、同一时间和运行编号 |
 | 升级页面 | 恢复出厂 / 不保留配置升级后重连默认管理 IP；保留配置升级仍沿用当前地址 |
-| 自动清理 | 构建与发布流程结束后自动执行，每日北京时间 **02:30** 兜底；每机型保留 1 个正式 Release，缓存按组 / 机型及类型保留 1 代 |
+| 自动清理 | 构建与发布流程结束后自动执行，每日北京时间 **02:30** 兜底；每机型保留 1 个正式 Release，缓存按组 / 机型及类型保留 1 代，每个 workflow 保留最近 3 次运行记录（便于对比构建） |
 
 
 ### 工作流
@@ -52,7 +55,7 @@
 | 入口 | 功能 |
 | :--- | :--- |
 | [Build firmware](https://github.com/WoChen5770/openwrt_build/actions/workflows/build.yml) | 锁定源码与配置、并行编译、筛选成功产物、校验并发布 Release |
-| [Clean old releases and caches](https://github.com/WoChen5770/openwrt_build/actions/workflows/cleanup.yml) | 清理本项目可识别的旧 Release / 标签和缓存；支持手动预览 |
+| [Clean old releases, caches and workflow runs](https://github.com/WoChen5770/openwrt_build/actions/workflows/cleanup.yml) | 清理本项目可识别的旧 Release / 标签、缓存和 Actions 运行记录；支持手动预览 |
 | [Repository checks](https://github.com/WoChen5770/openwrt_build/actions/workflows/check.yml) | 检查配置、校验脚本和 Actions 语法，不编译固件 |
 
 
@@ -80,6 +83,7 @@ Scripts/             构建脚本、插件集成及配套资源
 | 进阶选项 | 说明 |
 | :--- | :--- |
 | `source_commit` | 单机型锁定上游完整 40 位 SHA |
+| `kernel_compression` | 仅赵云可用：`profile`（默认 LZMA）、`lzma` 或 `gzip`。 |
 | Python | 构建脚本需要 3.11+，Actions 已满足 |
 | `packages` | 本次构建追加选包，优先级高于配置文件；只能填写 `CONFIG_PACKAGE_name=y/m/n` |
 | `Config/PRIVATE.txt` | 可选的最后一层配置，应用到所选机型（`all` 时是全部机型） |
@@ -89,7 +93,7 @@ Scripts/             构建脚本、插件集成及配套资源
 | host / 工具链缓存 | 同一源码、target / subtarget 的机型共享；指纹只包含工具链相关源码和配置 |
 | hostpkg 缓存 | 独立保存软件包宿主工具，额外校验 feeds、插件、配置与集成脚本 |
 | 7DR7299 MTK 的 Go | 仅 dae / daed 使用锁定的独立 Go 1.27 工具链；其他软件包继续使用上游 Go |
-| MTK 服务 | 不集成 Mesh / daed / honk；OAF 已集成但默认不启动，UPnP 走 nftables 变体 |
+| MTK 服务 | 不集成 Mesh；daed / honk 已集成，默认不启用 |
 
 临时选包示例（可多行，也可用字面量 `\n` 分隔）：
 
