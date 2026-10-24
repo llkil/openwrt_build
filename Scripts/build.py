@@ -638,6 +638,9 @@ def apply_defaults(tree, values, vendor=False, wireless_defaults=None):
             ("package/honk/files/honk.config", ("enabled",)),
         ):
             path = tree / relative
+            if not path.is_file():
+                # Profile no longer integrates daed/honk sources; nothing to patch.
+                continue
             content = path.read_text()
             for option in options:
                 pattern = r"(?m)^([ \t]*option[ \t]+" + option + r"[ \t]+)(?:'[^'\n]*'|\"[^\"\n]*\"|\S+)[ \t]*$"
