@@ -53,4 +53,7 @@ WLIST
 fi
 
 /etc/init.d/smartdns enable
+
+# 首启 60 秒后拉取一次规则（crontab 只到每周三，首次开机必须补一次）
+(sleep 60 && /etc/init.d/smartdns updatefiles) >/tmp/smartdns-firstboot.log 2>&1 &
 exit 0
