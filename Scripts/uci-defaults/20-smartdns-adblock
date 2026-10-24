@@ -1,0 +1,52 @@
+#!/bin/sh
+# SmartDNS 去广告预配置（首次开机执行一次）
+# - 监听 6053，dnsmasq 自动转发（auto_set_dnsmasq）
+# - 双广告规则：AWAvenue（~1k 条）+ anti-AD（~10 万条），落 /etc/smartdns/conf.d/
+# - 内置 cron：每周三 05:00 执行 /etc/init.d/smartdns updatefiles 拉取最新规则
+# - whitelist.conf 为用户白名单占位，条目写法：domain-rules /example.com/ -address -
+
+uci -q set smartdns.@smartdns[0].enabled='1'
+uci -q set smartdns.@smartdns[0].port='6053'
+uci -q set smartdns.@smartdns[0].auto_set_dnsmasq='1'
+uci -q set smartdns.@smartdns[0].tcp_server='1'
+uci -q set smartdns.@smartdns[0].ipv6_server='1'
+uci -q set smartdns.@smartdns[0].cache_size='4096'
+uci -q set smartdns.@smartdns[0].speed_check_mode='ping,tcp:80'
+uci -q set smartdns.@smartdns[0].force_aaaa_soa='0'
+uci -q set smartdns.@smartdns[0].auto_update_week_time='3'
+uci -q set smartdns.@smartdns[0].auto_update_day_time='5'
+
+# 规则加载顺序：白名单在最前
+uci -q delete smartdns.@smartdns[0].conf_files
+uci -q add_list smartdns.@smartdns[0].conf_files='whitelist.conf'
+uci -q add_list smartdns.@smartdns[0].conf_files='AWAvenue-Ads-Rule.conf'
+uci -q add_list smartdns.@smartdns[0].conf_files='anti-ad-for-smartdns.conf'
+
+# 规则下载源（type=config → 落 /etc/smartdns/conf.d/）
+uci -q delete smartdns.awa
+uci -q set smartdns.awa=download-file
+uci -q set smartdns.awa.url='https://raw.githubusercontent.com/TG-Twilight/AWAvenue-Ads-Rule/main/Filters/AWAvenue-Ads-Rule-SmartDNS.conf'
+uci -q set smartdns.awa.name='AWAvenue-Ads-Rule.conf'
+uci -q set smartdns.awa.type='config'
+
+uci -q delete smartdns.antiad
+uci -q set smartdns.antiad=download-file
+uci -q set smartdns.antiad.url='https://anti-ad.net/anti-ad-for-smartdns.conf'
+uci -q set smartdns.antiad.name='anti-ad-for-smartdns.conf'
+uci -q set smartdns.antiad.type='config'
+
+uci -q commit smartdns
+
+# 白名单占位文件（相对 conf_files 解析到 /etc/smartdns/conf.d/）
+if [ ! -f /etc/smartdns/conf.d/whitelist.conf ]; then
+	mkdir -p /etc/smartdns/conf.d
+	cat > /etc/smartdns/conf.d/whitelist.conf <<'WLIST'
+# SmartDNS 白名单：命中广告规则的域名在此解除拦截，一行一条
+# 写法示例（去掉行首 # 生效）：
+# domain-rules /example.com/ -address -
+# domain-rules /push.apple.com/ -address -
+WLIST
+fi
+
+/etc/init.d/smartdns enable
+exit 0
