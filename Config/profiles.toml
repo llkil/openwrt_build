@@ -147,6 +147,7 @@ required = [
   "PACKAGE_miniupnpd-nftables",
   # SmartDNS 去广告 DNS
   "PACKAGE_smartdns",
+  "PACKAGE_smartdns-ui",
   "PACKAGE_luci-app-smartdns",
   "PACKAGE_luci-i18n-smartdns-zh-cn",
 ]
@@ -205,6 +206,7 @@ required_image_packages = [
   "luci-i18n-upnp-zh-cn",
   "miniupnpd-nftables",
   "smartdns",
+  "smartdns-ui",
   "luci-app-smartdns",
   "luci-i18n-smartdns-zh-cn",
 ]
