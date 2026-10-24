@@ -445,7 +445,7 @@ def integrate(lock, tree):
             for directory in dirs:
                 if not (clone / directory / "Makefile").is_file():
                     raise ValueError(name + ": missing recipe " + directory)
-            names = package.get("remove") or ([name] if dirs == ["."] else dirs)
+            names = package.get("remove") or ([name] if dirs == ["."] else [Path(d).name for d in dirs])
             remove_packages(tree, names)
             if mode == "whole":
                 destination = tree / "package/custom" / name
