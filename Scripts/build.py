@@ -172,12 +172,6 @@ def validate_config(profile_id, profile, content, selections=None):
     forbidden = set(profile["forbidden"]) | {"PACKAGE_bandix", "PACKAGE_luci-app-bandix", "PACKAGE_wpad-mesh-openssl"}
     # Preserve exclusions after applying private and temporary package overrides.
     forbidden.update(key for key, value in selections.items() if key.startswith("PACKAGE_") and value == "n")
-    if values.get("PACKAGE_luci-app-passwall") == "y":
-        # Fail closed if upstream adds a new, enabled proxy backend.
-        allowed = {"PACKAGE_luci-app-passwall_INCLUDE_Xray", "PACKAGE_luci-app-passwall_INCLUDE_Geoview",
-                   "PACKAGE_luci-app-passwall_INCLUDE_V2ray_Geoview",
-                   "PACKAGE_luci-app-passwall_INCLUDE_V2ray_Geodata"}
-        forbidden.update(key for key in values if key.startswith("PACKAGE_luci-app-passwall_INCLUDE_") and key not in allowed)
     errors += ["Forbidden CONFIG_" + key for key in sorted(forbidden) if values.get(key) in ("y", "m")]
     errors += ["Forbidden QModem option: CONFIG_" + key for key, value in values.items()
                if value in ("y", "m") and key.lower().startswith(("package_qmodem", "package_luci-app-qmodem", "package_luci-i18n-qmodem"))]
@@ -295,6 +289,23 @@ def assign_cache_writers(matrix, profiles):
         item["ccache_write"] = item["profile"] == writers[item["ccache_group"]][1]
 
 
+def compression_profile(profile_id, profile, compression="profile"):
+    if compression not in ("profile", "lzma", "gzip"):
+        raise ValueError("Invalid kernel compression")
+    if profile_id != "jdcloud-re-cs-06":
+        if compression != "profile":
+            raise ValueError("A kernel compression override requires jdcloud-re-cs-06")
+        return dict(profile)
+    selected = profile.get("kernel_compression", "lzma") if compression == "profile" else compression
+    if selected not in ("lzma", "gzip"):
+        raise ValueError("Invalid RE-CS-06 kernel compression")
+    lzma_patch = "Scripts/Patches/jdcloud-re-cs-06-lzma-kernel.patch"
+    patches = [path for path in profile.get("patches", []) if path != lzma_patch]
+    if selected == "lzma":
+        patches.insert(0, lzma_patch)
+    return {**profile, "kernel_compression": selected, "patches": patches}
+
+
 def plan(args):
     settings = read_toml(ROOT / "Config/build-settings.toml")
     matrix = []
@@ -305,6 +316,9 @@ def plan(args):
         raise ValueError("Unknown profile")
     if args.commit and args.profile == "all":
         raise ValueError("A commit override requires a single profile")
+    compression = getattr(args, "kernel_compression", "profile")
+    if compression != "profile" and args.profile != "jdcloud-re-cs-06":
+        raise ValueError("A kernel compression override requires jdcloud-re-cs-06")
     overrides = package_overrides(getattr(args, "packages", ""))
     owner = os.environ.get("GITHUB_REPOSITORY", "local/local").split("/", 1)[0]
     if not re.fullmatch(r"[A-Za-z0-9-]+", owner):
@@ -323,6 +337,7 @@ def plan(args):
         for profile_id, profile in specs["profiles"].items():
             if args.profile not in ("all", profile_id):
                 continue
+            profile = compression_profile(profile_id, profile, compression)
             source_id = profile["source"]
             source = specs["sources"][source_id]
             if source_id not in source_commits:
@@ -364,7 +379,10 @@ def plan(args):
                 print("Unchanged: " + profile_id)
                 continue
             write_json(output / (profile_id + ".json"), lock)
-            matrix.append(dict(profile=profile_id, source_commit=lock["source"]["commit"], fingerprint=lock["fingerprint"]))
+            variant = profile.get("kernel_compression", "default")
+            group = "firmware-" + profile_id + ("-" + variant if variant != "default" else "")
+            matrix.append(dict(profile=profile_id, source_commit=lock["source"]["commit"], fingerprint=lock["fingerprint"],
+                               kernel_compression=variant, concurrency_group=group))
     assign_cache_writers(matrix, specs["profiles"])
     result = dict(matrix=dict(include=matrix), has_builds=bool(matrix), max_parallel=settings["max_parallel"],
                   retention_days=settings["artifact_retention_days"])
@@ -427,7 +445,7 @@ def integrate(lock, tree):
             for directory in dirs:
                 if not (clone / directory / "Makefile").is_file():
                     raise ValueError(name + ": missing recipe " + directory)
-            names = package.get("remove") or ([name] if dirs == ["."] else [Path(d).name for d in dirs])
+            names = package.get("remove") or ([name] if dirs == ["."] else dirs)
             remove_packages(tree, names)
             if mode == "whole":
                 destination = tree / "package/custom" / name
@@ -435,10 +453,7 @@ def integrate(lock, tree):
                 shutil.copytree(clone, destination, ignore=shutil.ignore_patterns(".git", ".github"))
             else:
                 for directory in dirs:
-                    # Recipes may be addressed by a feed-relative path; the recipe
-                    # name is its last component and that is where it must land.
-                    shutil.copytree(clone / directory, tree / "package" / Path(directory).name,
-                                    ignore=shutil.ignore_patterns(".git", ".github"))
+                    shutil.copytree(clone / directory, tree / "package" / directory, ignore=shutil.ignore_patterns(".git", ".github"))
     if "golang-daed" in lock["packages"]:
         use_daed_go_toolchain(tree, lock["packages"]["golang-daed"]["version"])
     if "luci-app-adguardhome" in lock["packages"]:
@@ -502,6 +517,18 @@ def use_packaged_adguardhome(tree):
     if count != 1:
         raise ValueError("AdGuard Home binary path defaults changed upstream")
     path.write_text(content)
+
+
+def apply_source_patches(tree, profile):
+    for name in profile.get("patches", []):
+        relative = Path(name)
+        if relative.is_absolute() or ".." in relative.parts or relative.parts[:2] != ("Scripts", "Patches"):
+            raise ValueError("Invalid source patch path")
+        path = ROOT / relative
+        if not path.is_file():
+            raise ValueError("Source patch is missing: " + name)
+        print("Applying source patch: " + name, flush=True)
+        run("patch", "--batch", "--forward", "--fuzz=0", "-p1", "-i", str(path), cwd=tree)
 
 
 def apply_kernel_config(tree, profile):
@@ -611,8 +638,6 @@ def apply_defaults(tree, values, vendor=False, wireless_defaults=None):
             ("package/honk/files/honk.config", ("enabled",)),
         ):
             path = tree / relative
-            if not path.exists():
-                continue
             content = path.read_text()
             for option in options:
                 pattern = r"(?m)^([ \t]*option[ \t]+" + option + r"[ \t]+)(?:'[^'\n]*'|\"[^\"\n]*\"|\S+)[ \t]*$"
@@ -832,6 +857,7 @@ def prepare(args):
     remove_qmodem(tree)
     vendor = lock["profile"].get("variant") == "mtk-vendor" or lock["profile"]["source"] == "chasey"
     apply_defaults(tree, lock["defaults"], vendor, lock["profile"].get("wireless_defaults"))
+    apply_source_patches(tree, lock["profile"])
     apply_kernel_config(tree, lock["profile"])
     customize_luci(tree, lock["defaults"], identity)
     write_json(tree / ".build-identity.json", identity)
@@ -902,6 +928,29 @@ def seven_dr_images(target, profile):
     return images
 
 
+def validate_jdcloud_sysupgrade(path, tree, compression="lzma"):
+    # Check the shipped FIT, not just the source recipe; never enlarge the kernel slot.
+    if compression not in ("lzma", "gzip"):
+        raise ValueError("Invalid RE-CS-06 kernel compression")
+    with tempfile.TemporaryDirectory(prefix="owrt-kernel-check-") as temporary:
+        kernel = Path(temporary) / "kernel.itb"
+        with tarfile.open(path) as archive:
+            members = [m for m in archive.getmembers() if m.isfile() and m.name.endswith("/kernel")]
+            if len(members) != 1:
+                raise ValueError("Expected one RE-CS-06 sysupgrade kernel")
+            size = members[0].size
+            limit = 7168 * 1024
+            if not 0 < size <= limit:
+                raise ValueError(f"RE-CS-06 FIT kernel exceeds 7 MiB or is empty: {size} bytes")
+            with archive.extractfile(members[0]) as source, kernel.open("wb") as destination:
+                shutil.copyfileobj(source, destination)
+        listing = run(str(tree / "staging_dir/host/bin/mkimage"), "-l", str(kernel))
+        compressions = re.findall(r"(?m)^\s*Compression:\s*(.+?)\s*$", listing)
+        if not listing.startswith("FIT description:") or not compressions or compressions[0] != compression + " compressed":
+            raise ValueError(f"Expected a {compression.upper()}-compressed RE-CS-06 FIT kernel")
+    print(f"RE-CS-06 FIT kernel verified: {size} / {limit} bytes; {compression.upper()}")
+
+
 def validate_mtk_sysupgrade(path):
     # Inspect the actual SquashFS, not just Kconfig or the package manifest.
     with tempfile.TemporaryDirectory(prefix="owrt-image-check-") as temporary:
@@ -932,7 +981,7 @@ def validate_mtk_sysupgrade(path):
 
 def release_notes(lock, identity=None, config_name="Config-*.txt"):
     profile, values, source = lock["profile"], lock["defaults"], lock["source"]
-    label = profile.get("display_name", lock["profile_id"])
+    label = profile.get("release_name") or profile.get("display_name", lock["profile_id"])
     repository = source["repository"].removesuffix(".git")
     notes = "ImmortalWrt · " + label + "\n\n"
     if identity:
@@ -947,6 +996,10 @@ def release_notes(lock, identity=None, config_name="Config-*.txt"):
     else:
         notes += "\nx86 无内置无线时不生成热点。\n"
     notes += "\n> 首次登录请修改默认密码。只刷匹配机型与分区的镜像；sysupgrade 不代表适用于原厂首次刷入，勿强刷。\n"
+    if lock["profile_id"] == "jdcloud-re-cs-06":
+        compression = profile.get("kernel_compression", "lzma").upper()
+        notes += (f"\n> RE-CS-06 使用 {compression}/FIT 内核，保留上游 7 MiB 内核区域与 eMMC 布局，"
+                  "刷入前请确认引导器兼容。\n")
     if lock["profile_id"].startswith("s20p-"):
         notes += "\n> S20P MTK / MT76 不保证直接互刷。"
         if profile["source"] == "chasey":
@@ -956,7 +1009,7 @@ def release_notes(lock, identity=None, config_name="Config-*.txt"):
         notes += "\n> 仅适用于 TP-Link TL-7DR7299 v1。MT76 / MTK 的引导器及分区布局需分别核对，不保证直接互刷。"
         notes += "sysupgrade.itb 用于匹配布局的 OpenWrt 升级；recovery.itb 为恢复镜像，不是原厂首次刷入包；不发布引导器。"
         if profile["variant"] == "mtk-vendor":
-            notes += "闭源版不集成 Mesh / DAWN / daed / honk；OAF 已集成但默认不启动，启用前验证 HNAT / WARP 兼容性。"
+            notes += "闭源版不集成 Mesh / DAWN；daed / honk 默认关闭，启用前验证 HNAT / WARP 兼容性。"
         notes += "\n"
     notes += "\n<details>\n<summary>源码与文件</summary>\n\n"
     notes += "源码：[" + source["branch"] + " · " + source["commit"][:7] + "](" + repository + "/commit/" + source["commit"] + ")。\n\n"
@@ -979,6 +1032,11 @@ def collect(args):
     if identity["profile_id"] != lock["profile_id"]:
         raise ValueError("Build identity profile mismatch")
     manifest = validate_image_packages(target, profile, lock["profile_id"])
+    if lock["profile_id"] == "jdcloud-re-cs-06":
+        sysupgrades = list(target.glob("*" + profile["image_match"] + "*sysupgrade*.bin"))
+        if len(sysupgrades) != 1:
+            raise ValueError("Expected one RE-CS-06 sysupgrade image")
+        validate_jdcloud_sysupgrade(sysupgrades[0], tree, profile.get("kernel_compression", "lzma"))
     fit_images = seven_dr_images(target, profile) if lock["profile_id"].startswith("7dr7299-") else None
     if lock["profile_id"] == "s20p-mtk":
         sysupgrades = list(target.glob("*" + profile["image_match"] + "*sysupgrade*.bin"))
@@ -988,7 +1046,8 @@ def collect(args):
     output.mkdir(parents=True, exist_ok=True)
     if any(output.iterdir()):
         raise ValueError("Collection output must be empty")
-    stamp = lock["profile_id"] + "-" + identity["build_date"] + "-r" + identity["run_id"] + "-" + identity["run_attempt"]
+    variant = "-" + profile.get("kernel_compression", "lzma") if lock["profile_id"] == "jdcloud-re-cs-06" else ""
+    stamp = lock["profile_id"] + variant + "-" + identity["build_date"] + "-r" + identity["run_id"] + "-" + identity["run_attempt"]
     diagnostics = ROOT / "logs/metadata"
     diagnostics.mkdir(parents=True, exist_ok=True)
     images = []
@@ -1050,6 +1109,7 @@ def main():
     p.add_argument("--profile", default="all")
     p.add_argument("--commit")
     p.add_argument("--packages", default="")
+    p.add_argument("--kernel-compression", choices=("profile", "lzma", "gzip"), default="profile")
     p.add_argument("--event", default="workflow_dispatch")
     p.add_argument("--force", action="store_true")
     p.add_argument("--output-dir", default=".state")
