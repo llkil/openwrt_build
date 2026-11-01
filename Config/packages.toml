@@ -74,7 +74,7 @@ mode = "whole"
 [fakemesh]
 repository = "https://github.com/x-wrt/com.x-wrt.git"
 commit = "3d7a49e1c37162dcf7d660d9385c049adb5f050a"
-profiles = ["tenda-be12-pro", "jdcloud-re-cs-06", "7dr7299-mtk"]
+profiles = ["tenda-be12-pro", "jdcloud-re-cs-06"]
 mode = "fakemesh"
 
 # 代理核心

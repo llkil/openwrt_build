@@ -82,6 +82,7 @@ required_image_packages = [
   "luci-app-smartdns",
   "luci-i18n-smartdns-zh-cn",
   "smartdns-ui",
+  "luci-app-fakemesh",
   "luci-app-mesh",
   "dawn",
   "batctl-default",
@@ -186,7 +187,6 @@ required = [
   "PACKAGE_luci-app-easytier",
   "PACKAGE_luci-proto-wireguard",
   "PACKAGE_wireguard-tools",
-  "PACKAGE_luci-app-fakemesh",
   # 内存释放
   "PACKAGE_luci-app-ramfree",
   # SmartDNS 去广告 DNS
@@ -253,7 +253,6 @@ required_image_packages = [
   "luci-app-easytier",
   "luci-proto-wireguard",
   "wireguard-tools",
-  "luci-app-fakemesh",
   "luci-app-ramfree",
   "mihomo-meta",
   "nikki",
@@ -287,6 +286,7 @@ forbidden_image_packages = [
   "kmod-oaf",
   "luci-app-openclash",
   "smartdns-ui",
+  "luci-app-fakemesh",
 ]
 
 # 禁用配置
@@ -315,6 +315,7 @@ forbidden = [
   "PACKAGE_kmod-oaf",
   "PACKAGE_luci-app-openclash",
   "PACKAGE_smartdns-ui",
+  "PACKAGE_luci-app-fakemesh",
 ]
 
 # 内核补充项
