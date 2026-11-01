@@ -43,6 +43,23 @@ required = [
   # 内存释放
   "PACKAGE_luci-app-ramfree",
   "PACKAGE_luci-app-openclash",
+  # 应用过滤（OAF）
+  "PACKAGE_luci-app-oaf",
+  "PACKAGE_luci-i18n-oaf-zh-cn",
+  "PACKAGE_appfilter",
+  "PACKAGE_kmod-oaf",
+  # SmartDNS 全套
+  "PACKAGE_smartdns",
+  "PACKAGE_luci-app-smartdns",
+  "PACKAGE_luci-i18n-smartdns-zh-cn",
+  "PACKAGE_smartdns-ui",
+  # Mesh：802.11s + DAWN + batman-adv
+  "PACKAGE_luci-app-mesh",
+  "PACKAGE_dawn",
+  "PACKAGE_batctl-default",
+  "PACKAGE_kmod-batman-adv",
+  # WireGuard
+  "PACKAGE_luci-proto-wireguard",
 ]
 
 # 固件必需包
@@ -57,6 +74,19 @@ required_image_packages = [
   "automount",
   "luci-app-ramfree",
   "luci-app-openclash",
+  "luci-app-oaf",
+  "luci-i18n-oaf-zh-cn",
+  "appfilter",
+  "kmod-oaf",
+  "smartdns",
+  "luci-app-smartdns",
+  "luci-i18n-smartdns-zh-cn",
+  "smartdns-ui",
+  "luci-app-mesh",
+  "dawn",
+  "batctl-default",
+  "kmod-batman-adv",
+  "luci-proto-wireguard",
   "luci-i18n-upnp-zh-cn",
   "miniupnpd-nftables",
 ]
