@@ -443,3 +443,6 @@ CONFIG_PACKAGE_smartdns-ui=y
 #     闭源栈没有 hostapd/mac80211，802.11s 与 DAWN 不可用；
 #     要 802.11s/DAWN 请用开源 MT76 版本。
 CONFIG_PACKAGE_luci-app-fakemesh=y
+
+# ── 内存释放（LuCI → 状态 → 内存释放，调用 drop_caches）
+CONFIG_PACKAGE_luci-app-ramfree=y

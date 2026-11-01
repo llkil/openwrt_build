@@ -44,6 +44,13 @@ branch = "main"
 profiles = ["xiaomi-be6500", "tenda-be12-pro", "s20p-mt76", "jdcloud-re-cs-06", "7dr7299-mt76"]
 mode = "mesh"
 
+# 内存释放（LuCI 页面 + drop_caches）
+[ramfree]
+repository = "https://github.com/sbwml/luci-app-ramfree.git"
+commit = "54dc42ded2e19f2f191b3ee54ac952f9d4acc8f4"
+profiles = ["7dr7299-mtk", "7dr7299-mt76"]
+mode = "whole"
+
 # 闭源无线组网：X-WRT FakeMesh（AP+STA 中继式组网，不依赖 mac80211/802.11s，
 # 适用于厂商私有 wifi 栈；7dr7299-mtk 因此也能做无线 mesh）
 [fakemesh]

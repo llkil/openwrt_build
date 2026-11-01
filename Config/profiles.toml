@@ -40,6 +40,8 @@ required = [
   "PACKAGE_kmod-sfp",
   "PACKAGE_kmod-usb3",
   "PACKAGE_automount",
+  # 内存释放
+  "PACKAGE_luci-app-ramfree",
 ]
 
 # 固件必需包
@@ -52,6 +54,9 @@ required_image_packages = [
   "kmod-sfp",
   "kmod-usb3",
   "automount",
+  "luci-app-ramfree",
+  "luci-i18n-upnp-zh-cn",
+  "miniupnpd-nftables",
 ]
 
 # 固件禁用包
@@ -147,6 +152,8 @@ required = [
   "PACKAGE_miniupnpd-nftables",
   # 闭源无线组网（X-WRT FakeMesh，源码由 packages.toml 集成）
   "PACKAGE_luci-app-fakemesh",
+  # 内存释放
+  "PACKAGE_luci-app-ramfree",
   # SmartDNS 去广告 DNS
   "PACKAGE_smartdns",
   "PACKAGE_smartdns-ui",
@@ -208,6 +215,7 @@ required_image_packages = [
   "luci-i18n-upnp-zh-cn",
   "miniupnpd-nftables",
   "luci-app-fakemesh",
+  "luci-app-ramfree",
   "smartdns",
   "smartdns-ui",
   "luci-app-smartdns",
