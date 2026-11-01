@@ -49,9 +49,18 @@ mode = "mesh"
 [openclash]
 repository = "https://github.com/vernesong/OpenClash.git"
 commit = "e553e82e01c697aefbe1555261a503f425e00ccd"
-profiles = ["7dr7299-mtk", "7dr7299-mt76"]
+profiles = ["7dr7299-mt76"]
 mode = "nested"
 directories = ["luci-app-openclash"]
+
+# nikki：mihomo 内核的透明代理（LuCI 界面 + 主程序 + 内核）
+# 内核 mihomo-meta 由 Go 现场编译（PKG_BUILD_DEPENDS:=golang/host），耗时较长属正常
+[nikki]
+repository = "https://github.com/nikkinikki-org/OpenWrt-nikki.git"
+commit = "78e1a751d55ed0762811f054ee699049473da7b8"
+profiles = ["7dr7299-mtk"]
+mode = "nested"
+directories = ["luci-app-nikki", "nikki", "mihomo-meta"]
 
 # 内存释放（LuCI 页面 + drop_caches）
 [ramfree]
@@ -79,7 +88,7 @@ mode = "honk"
 [oaf]
 repository = "https://github.com/destan19/OpenAppFilter.git"
 branch = "master"
-profiles = ["x86-64", "7dr7299-mtk", "7dr7299-mt76"]
+profiles = ["x86-64", "7dr7299-mt76"]
 mode = "whole"
 
 # UPnP 守护进程：源码 feed 的 openwrt-24.10 分支停在 2.3.9，

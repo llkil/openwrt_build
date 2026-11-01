@@ -112,6 +112,7 @@ TARGET_ROOTFS_INITRAMFS = "y"
 
 # 7DR7299 闭源版
 [profiles.7dr7299-mtk]
+# smartdns 保持出厂初始状态：不预置上游、不下载广告规则
 display_name = "TP-Link TL-7DR7299 v1 · MTK"
 source = "padavan-7dr7299"
 target = "mediatek"
@@ -119,6 +120,7 @@ subtarget = "filogic_a73"
 device = "tplink_tl-7dr7299-v1"
 image_match = "tplink_tl-7dr7299-v1"
 variant = "mtk-vendor"
+exclude_uci_defaults = ["20-smartdns-adblock"]
 wireless_defaults = "mtwifi-shell"
 legacy_name = "TPLINK-7DR7299-MTK"
 hostname = "7DR7299-MTK"
@@ -174,22 +176,26 @@ required = [
   "PACKAGE_kmod-nls-utf8",
   "PACKAGE_luci-app-mini-diskmanager",
   # 应用过滤（界面硬依赖 appfilter + kmod-oaf，无法拆分）
-  "PACKAGE_luci-app-oaf",
-  "PACKAGE_appfilter",
-  "PACKAGE_kmod-oaf",
-  "PACKAGE_luci-i18n-oaf-zh-cn",
   # UPnP
   "PACKAGE_luci-app-upnp",
   "PACKAGE_luci-i18n-upnp-zh-cn",
   "PACKAGE_miniupnpd-nftables",
   # 闭源无线组网（X-WRT FakeMesh，源码由 packages.toml 集成）
+  # 代理（PassWall）、异地组网（EasyTier）、WireGuard
+  "PACKAGE_luci-app-passwall",
+  "PACKAGE_luci-app-easytier",
+  "PACKAGE_luci-proto-wireguard",
+  "PACKAGE_wireguard-tools",
   "PACKAGE_luci-app-fakemesh",
   # 内存释放
   "PACKAGE_luci-app-ramfree",
-  "PACKAGE_luci-app-openclash",
   # SmartDNS 去广告 DNS
+  # nikki：mihomo 内核透明代理（与 PassWall 二选一启用）
+  "PACKAGE_mihomo-meta",
+  "PACKAGE_nikki",
+  "PACKAGE_luci-app-nikki",
+  "PACKAGE_luci-i18n-nikki-zh-cn",
   "PACKAGE_smartdns",
-  "PACKAGE_smartdns-ui",
   "PACKAGE_luci-app-smartdns",
   "PACKAGE_luci-i18n-smartdns-zh-cn",
 ]
@@ -240,18 +246,20 @@ required_image_packages = [
   "kmod-nls-cp437",
   "kmod-nls-utf8",
   "luci-app-mini-diskmanager",
-  "luci-app-oaf",
-  "appfilter",
-  "kmod-oaf",
-  "luci-i18n-oaf-zh-cn",
   "luci-app-upnp",
   "luci-i18n-upnp-zh-cn",
   "miniupnpd-nftables",
+  "luci-app-passwall",
+  "luci-app-easytier",
+  "luci-proto-wireguard",
+  "wireguard-tools",
   "luci-app-fakemesh",
   "luci-app-ramfree",
-  "luci-app-openclash",
+  "mihomo-meta",
+  "nikki",
+  "luci-app-nikki",
+  "luci-i18n-nikki-zh-cn",
   "smartdns",
-  "smartdns-ui",
   "luci-app-smartdns",
   "luci-i18n-smartdns-zh-cn",
 ]
@@ -273,6 +281,12 @@ forbidden_image_packages = [
   "luci-app-daede",
   "adguardhome",
   "luci-app-adguardhome",
+  "luci-app-oaf",
+  "luci-i18n-oaf-zh-cn",
+  "appfilter",
+  "kmod-oaf",
+  "luci-app-openclash",
+  "smartdns-ui",
 ]
 
 # 禁用配置
@@ -295,6 +309,12 @@ forbidden = [
   "PACKAGE_luci-app-daede",
   "PACKAGE_adguardhome",
   "PACKAGE_luci-app-adguardhome",
+  "PACKAGE_luci-app-oaf",
+  "PACKAGE_luci-i18n-oaf-zh-cn",
+  "PACKAGE_appfilter",
+  "PACKAGE_kmod-oaf",
+  "PACKAGE_luci-app-openclash",
+  "PACKAGE_smartdns-ui",
 ]
 
 # 内核补充项

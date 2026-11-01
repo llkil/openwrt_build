@@ -559,7 +559,8 @@ def apply_kernel_config(tree, profile):
     path.write_text("\n".join(lines) + "\n")
 
 
-def apply_defaults(tree, values, vendor=False, wireless_defaults=None):
+def apply_defaults(tree, values, vendor=False, wireless_defaults=None, exclude_uci_defaults=None):
+    excluded = set(exclude_uci_defaults or ())
     generator = tree / "package/base-files/files/bin/config_generate"
     content, count = re.subn(r"192\.168\.\d+\.\d+", values["lan_ip"], generator.read_text())
     if not count:
@@ -614,6 +615,9 @@ def apply_defaults(tree, values, vendor=False, wireless_defaults=None):
     overlay = tree / "files/etc/uci-defaults"
     overlay.mkdir(parents=True, exist_ok=True)
     for original in (ROOT / "Scripts/uci-defaults").iterdir():
+        if original.name in excluded:
+            print("uci-defaults: skipped " + original.name + " (profile opt-out)")
+            continue
         shutil.copy2(original, overlay / original.name)
     if values.get("network_tuning"):
         # Boot sysctl applies fq before netifd creates interfaces, not in uci-defaults.
@@ -895,7 +899,8 @@ def prepare(args):
         run("bash", str(private), cwd=tree, env=env)
     remove_qmodem(tree)
     vendor = lock["profile"].get("variant") == "mtk-vendor" or lock["profile"]["source"] == "chasey"
-    apply_defaults(tree, lock["defaults"], vendor, lock["profile"].get("wireless_defaults"))
+    apply_defaults(tree, lock["defaults"], vendor, lock["profile"].get("wireless_defaults"),
+                   lock["profile"].get("exclude_uci_defaults"))
     apply_source_patches(tree, lock["profile"])
     upgrade_dnsmasq(tree)
     apply_kernel_config(tree, lock["profile"])
