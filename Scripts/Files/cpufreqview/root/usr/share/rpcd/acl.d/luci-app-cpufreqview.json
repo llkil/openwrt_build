@@ -1,0 +1,12 @@
+{
+	"luci-app-cpufreqview": {
+		"description": "Grant read access to CPU frequency sysfs nodes",
+		"read": {
+			"file": {
+				"/sys/devices/system/cpu/cpufreq/": [ "read" ],
+				"/sys/devices/system/cpu/cpufreq/*": [ "read" ],
+				"/sys/devices/system/cpu/cpufreq/*/*": [ "read" ]
+			}
+		}
+	}
+}
