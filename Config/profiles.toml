@@ -198,6 +198,9 @@ required = [
   "PACKAGE_smartdns",
   "PACKAGE_luci-app-smartdns",
   "PACKAGE_luci-i18n-smartdns-zh-cn",
+  # CPU 频率：设置界面 + 状态页实时频率卡片（后者为自建包）
+  "PACKAGE_luci-app-cpufreq",
+  "PACKAGE_luci-app-cpufreqview",
 ]
 
 # 固件必需包
@@ -261,6 +264,8 @@ required_image_packages = [
   "smartdns",
   "luci-app-smartdns",
   "luci-i18n-smartdns-zh-cn",
+  "luci-app-cpufreq",
+  "luci-app-cpufreqview",
 ]
 
 # 固件禁用包
