@@ -664,6 +664,31 @@ def apply_defaults(tree, values, vendor=False, wireless_defaults=None, exclude_u
 DNSMASQ_VERSION = "2.93"
 DNSMASQ_HASH = "0c00d4e5c97c8306e5fb932b348b34269c9c29a0e7df0e8e82958b407092bc19"
 
+# 2.93 上游已内置下面 6 个 CVE 的修复（全部逐条比对过 2.93 源码）；
+# 旧 backport 补丁的上下文在新版里被重构掉，强行保留会在 patch 阶段中断编译。
+# 100 是 OpenWrt 的代码瘦身补丁，util.c 段在 2.93 里已移位失配，且非功能/安全必需。
+DNSMASQ_SUPERSEDED_PATCHES = (
+    ("001-CVE-2026-2291.patch", "2.93 CHANGELOG 明确包含（域名存储分配重写）"),
+    ("002-CVE-2026-4890.dnsmasq-2.91.patch", "2.93 用 check_type_bitmap() 重写，含 p[1] > offset 边界检查"),
+    ("003-CVE-2026-4891.patch", "2.93 validate_rrset() 已含 sig_len <= 0 校验"),
+    ("004-CVE-2026-4892.patch", "2.93 create_helper() 已把 CLID 截到 100 字节"),
+    ("005-CVE-2026-4893.patch", "2.93 process_reply() 已改用实际数据长度调 check_source()"),
+    ("006-CVE-2026-5172.patch", "2.93 extract_addresses() 已含 p1 > endrr 校验"),
+    ("100-remove-old-runtime-kernel-support.patch", "代码瘦身补丁，2.93 上下文已失效，非必需"),
+)
+
+
+def prune_dnsmasq_patches(tree):
+    """移除在 2.93 上必然失配的补丁，保留 200-ubus_dns 等 OpenWrt 自有补丁。"""
+    patch_dir = tree / "package/network/services/dnsmasq/patches"
+    if not patch_dir.is_dir():
+        return
+    for name, reason in DNSMASQ_SUPERSEDED_PATCHES:
+        patch = patch_dir / name
+        if patch.is_file():
+            patch.unlink()
+            print("dnsmasq: dropped patch " + name + " (" + reason + ")")
+
 
 def upgrade_dnsmasq(tree):
     path = tree / "package/network/services/dnsmasq/Makefile"
@@ -678,6 +703,7 @@ def upgrade_dnsmasq(tree):
         return
     if m.group(1) == DNSMASQ_VERSION:
         print("dnsmasq: already " + DNSMASQ_VERSION)
+        prune_dnsmasq_patches(tree)
         return
     old = m.group(1)
     content, n1 = re.subn(r"(PKG_UPSTREAM_VERSION:?=\s*)[0-9.]+", lambda mm: mm.group(1) + DNSMASQ_VERSION, content)
@@ -688,6 +714,7 @@ def upgrade_dnsmasq(tree):
         raise ValueError("dnsmasq: no source hash found, refusing to bump")
     path.write_text(content)
     print("dnsmasq: " + old + " -> " + DNSMASQ_VERSION + " (hash updated)")
+    prune_dnsmasq_patches(tree)
 
 
 def remove_qmodem(tree):
