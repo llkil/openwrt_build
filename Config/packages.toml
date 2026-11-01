@@ -91,14 +91,15 @@ branch = "master"
 profiles = ["x86-64", "7dr7299-mt76"]
 mode = "whole"
 
-# UPnP 守护进程：源码 feed 的 openwrt-24.10 分支停在 2.3.9，
-# 这里用上游 master 的 2.3.11 覆盖同名 recipe，取到最新版
+# UPnP 守护进程：必须与 viking 的 luci-app-upnp 配套。该界面写死
+# LUCI_EXTRA_DEPENDS:=miniupnpd (>=20261027-r7)，而 feeds 里的 recipe 用 2.3.x
+# 版本号，数值上远小于日期形式，opkg 依赖永远不满足；viking 的 recipe 是 20261101-r1。
 [miniupnpd]
-repository = "https://github.com/immortalwrt/packages.git"
-branch = "master"
+repository = "https://github.com/VIKINGYFY/packages.git"
+branch = "main"
 profiles = ["7dr7299-mtk"]
 mode = "nested"
-directories = ["net/miniupnpd"]
+directories = ["miniupnpd"]
 
 # 磁盘管理
 [mini-diskmanager]
