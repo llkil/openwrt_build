@@ -484,6 +484,11 @@ def integrate(lock, tree):
     target = tree / "package/owrt-core-update/files"
     target.mkdir(exist_ok=True)
     shutil.copy2(ROOT / "Scripts/Files/core-update/owrt-core-update", target / "owrt-core-update")
+    # 自建小插件：状态页 CPU 频率卡片（纯前端 JS + sysfs 读取 ACL，无二进制）
+    target = tree / "package/luci-app-cpufreqview"
+    if target.exists():
+        shutil.rmtree(target)
+    shutil.copytree(ROOT / "Scripts/Files/cpufreqview", target)
     # Maintain the old Rust build fix without unrelated theme/download hacks.
     for path in (tree / "feeds/packages").glob("*/rust/Makefile"):
         path.write_text(path.read_text().replace("ci-llvm=true", "ci-llvm=false"))
