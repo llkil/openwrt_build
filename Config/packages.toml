@@ -44,6 +44,14 @@ branch = "main"
 profiles = ["xiaomi-be6500", "tenda-be12-pro", "s20p-mt76", "jdcloud-re-cs-06", "7dr7299-mt76"]
 mode = "mesh"
 
+# 闭源无线组网：X-WRT FakeMesh（AP+STA 中继式组网，不依赖 mac80211/802.11s，
+# 适用于厂商私有 wifi 栈；7dr7299-mtk 因此也能做无线 mesh）
+[fakemesh]
+repository = "https://github.com/x-wrt/com.x-wrt.git"
+commit = "3d7a49e1c37162dcf7d660d9385c049adb5f050a"
+profiles = ["tenda-be12-pro", "jdcloud-re-cs-06", "7dr7299-mtk"]
+mode = "fakemesh"
+
 # 代理核心
 [honk]
 repository = "https://github.com/189160/luci-app-honk.git"

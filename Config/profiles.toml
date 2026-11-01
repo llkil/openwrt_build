@@ -145,6 +145,8 @@ required = [
   "PACKAGE_luci-app-upnp",
   "PACKAGE_luci-i18n-upnp-zh-cn",
   "PACKAGE_miniupnpd-nftables",
+  # 闭源无线组网（X-WRT FakeMesh，源码由 packages.toml 集成）
+  "PACKAGE_luci-app-fakemesh",
   # SmartDNS 去广告 DNS
   "PACKAGE_smartdns",
   "PACKAGE_smartdns-ui",
@@ -205,6 +207,7 @@ required_image_packages = [
   "luci-app-upnp",
   "luci-i18n-upnp-zh-cn",
   "miniupnpd-nftables",
+  "luci-app-fakemesh",
   "smartdns",
   "smartdns-ui",
   "luci-app-smartdns",

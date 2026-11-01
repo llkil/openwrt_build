@@ -438,3 +438,8 @@ CONFIG_PACKAGE_smartdns=y
 CONFIG_PACKAGE_luci-app-smartdns=y
 CONFIG_PACKAGE_luci-i18n-smartdns-zh-cn=y
 CONFIG_PACKAGE_smartdns-ui=y
+
+# ── Mesh：X-WRT FakeMesh（AP+STA 中继式组网，兼容厂商私有 wifi 栈）。
+#     闭源栈没有 hostapd/mac80211，802.11s 与 DAWN 不可用；
+#     要 802.11s/DAWN 请用开源 MT76 版本。
+CONFIG_PACKAGE_luci-app-fakemesh=y

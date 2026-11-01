@@ -6,11 +6,12 @@
 # - whitelist.conf 为用户白名单占位，条目写法：domain-rules /example.com/ -address -
 
 uci -q set smartdns.@smartdns[0].enabled='1'
+uci -q set smartdns.@smartdns[0].log_level='warn'
 uci -q set smartdns.@smartdns[0].port='6053'
 uci -q set smartdns.@smartdns[0].auto_set_dnsmasq='1'
 uci -q set smartdns.@smartdns[0].tcp_server='1'
 uci -q set smartdns.@smartdns[0].ipv6_server='1'
-uci -q set smartdns.@smartdns[0].cache_size='4096'
+uci -q set smartdns.@smartdns[0].cache_size='65536'
 uci -q set smartdns.@smartdns[0].speed_check_mode='ping,tcp:80'
 uci -q set smartdns.@smartdns[0].force_aaaa_soa='0'
 uci -q set smartdns.@smartdns[0].ui='1'

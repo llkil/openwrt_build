@@ -3,7 +3,7 @@
 set -euo pipefail
 
 case "${WRT_CONFIG:-}" in
-	TENDA-BE12-PRO|JDCLOUD-RE-CS-06) ;;
+	TENDA-BE12-PRO|JDCLOUD-RE-CS-06|TPLINK-7DR7299-MTK) ;;
 	*) exit 0 ;;
 esac
 

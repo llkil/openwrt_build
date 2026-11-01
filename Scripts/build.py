@@ -427,12 +427,17 @@ def integrate(lock, tree):
     env = {**os.environ, "GITHUB_WORKSPACE": str(ROOT), "WRT_CONFIG": lock["profile"]["legacy_name"]}
     for name, package in lock["packages"].items():
         mode = package["mode"]
-        if mode in ("mesh", "honk"):
+        if mode in ("mesh", "honk", "fakemesh"):
             if mode == "mesh":
                 env["MESH_COMMIT"] = package["commit"]
+                script = "Mesh.sh"
+            elif mode == "fakemesh":
+                env["FAKEMESH_COMMIT"] = package["commit"]
+                script = "Fakemesh.sh"
             else:
                 env["HONK_COMMIT"] = package["commit"]
-            run("bash", str(ROOT / "Scripts" / ("Mesh.sh" if mode == "mesh" else "Honk.sh")), cwd=tree, env=env)
+                script = "Honk.sh"
+            run("bash", str(ROOT / "Scripts" / script), cwd=tree, env=env)
             continue
         with tempfile.TemporaryDirectory(prefix="owrt-package-") as temporary:
             clone = Path(temporary) / "source"
