@@ -446,3 +446,6 @@ CONFIG_PACKAGE_luci-app-fakemesh=y
 
 # ── 内存释放（LuCI → 状态 → 内存释放，调用 drop_caches）
 CONFIG_PACKAGE_luci-app-ramfree=y
+
+# ── OpenClash（与 PassWall 二选一启用，同时开启会互抢 DNS/nft 规则）
+CONFIG_PACKAGE_luci-app-openclash=y

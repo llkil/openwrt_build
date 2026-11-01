@@ -42,6 +42,7 @@ required = [
   "PACKAGE_automount",
   # 内存释放
   "PACKAGE_luci-app-ramfree",
+  "PACKAGE_luci-app-openclash",
 ]
 
 # 固件必需包
@@ -55,6 +56,7 @@ required_image_packages = [
   "kmod-usb3",
   "automount",
   "luci-app-ramfree",
+  "luci-app-openclash",
   "luci-i18n-upnp-zh-cn",
   "miniupnpd-nftables",
 ]
@@ -154,6 +156,7 @@ required = [
   "PACKAGE_luci-app-fakemesh",
   # 内存释放
   "PACKAGE_luci-app-ramfree",
+  "PACKAGE_luci-app-openclash",
   # SmartDNS 去广告 DNS
   "PACKAGE_smartdns",
   "PACKAGE_smartdns-ui",
@@ -216,6 +219,7 @@ required_image_packages = [
   "miniupnpd-nftables",
   "luci-app-fakemesh",
   "luci-app-ramfree",
+  "luci-app-openclash",
   "smartdns",
   "smartdns-ui",
   "luci-app-smartdns",

@@ -655,6 +655,37 @@ def apply_defaults(tree, values, vendor=False, wireless_defaults=None):
             path.write_text(content)
 
 
+# 上游 dnsmasq 最新稳定版及其源码哈希；源码树落后时抬到该版本。
+# 若该树的补丁集与新版源码不兼容，构建会在 patch 阶段立刻失败（fail-loud）。
+DNSMASQ_VERSION = "2.93"
+DNSMASQ_HASH = "0c00d4e5c97c8306e5fb932b348b34269c9c29a0e7df0e8e82958b407092bc19"
+
+
+def upgrade_dnsmasq(tree):
+    path = tree / "package/network/services/dnsmasq/Makefile"
+    if not path.is_file():
+        return
+    content = path.read_text()
+    m = re.search(r"PKG_UPSTREAM_VERSION:?=\s*([0-9.]+)", content)
+    if not m:
+        m = re.search(r"PKG_VERSION:?=\s*([0-9.]+)", content)
+    if not m:
+        print("dnsmasq: version not found, skipped")
+        return
+    if m.group(1) == DNSMASQ_VERSION:
+        print("dnsmasq: already " + DNSMASQ_VERSION)
+        return
+    old = m.group(1)
+    content, n1 = re.subn(r"(PKG_UPSTREAM_VERSION:?=\s*)[0-9.]+", lambda mm: mm.group(1) + DNSMASQ_VERSION, content)
+    content, n2 = re.subn(r"(PKG_VERSION:?=\s*)[0-9.]+(?=\s*$)", lambda mm: mm.group(1) + DNSMASQ_VERSION, content, flags=re.M)
+    content, n3 = re.subn(r"(PKG_HASH:?=\s*)[0-9a-f]{64}", lambda mm: mm.group(1) + DNSMASQ_HASH, content)
+    content, n4 = re.subn(r"(PKG_MIRROR_HASH:?=\s*)[0-9a-f]{64}", lambda mm: mm.group(1) + DNSMASQ_HASH, content)
+    if not n3 and not n4:
+        raise ValueError("dnsmasq: no source hash found, refusing to bump")
+    path.write_text(content)
+    print("dnsmasq: " + old + " -> " + DNSMASQ_VERSION + " (hash updated)")
+
+
 def remove_qmodem(tree):
     """Prune matching recipes and feed links without following directory symlinks."""
     for root in (tree / "package", tree / "feeds"):
@@ -866,6 +897,7 @@ def prepare(args):
     vendor = lock["profile"].get("variant") == "mtk-vendor" or lock["profile"]["source"] == "chasey"
     apply_defaults(tree, lock["defaults"], vendor, lock["profile"].get("wireless_defaults"))
     apply_source_patches(tree, lock["profile"])
+    upgrade_dnsmasq(tree)
     apply_kernel_config(tree, lock["profile"])
     customize_luci(tree, lock["defaults"], identity)
     write_json(tree / ".build-identity.json", identity)

@@ -44,6 +44,15 @@ branch = "main"
 profiles = ["xiaomi-be6500", "tenda-be12-pro", "s20p-mt76", "jdcloud-re-cs-06", "7dr7299-mt76"]
 mode = "mesh"
 
+# OpenClash（Lua CBI 界面，需 luci-compat；与 PassWall 二选一启用）
+# Makefile 会按 fw4 自动选 kmod-nft-tproxy / dnsmasq-full-nftset / kmod-inet-diag
+[openclash]
+repository = "https://github.com/vernesong/OpenClash.git"
+commit = "e553e82e01c697aefbe1555261a503f425e00ccd"
+profiles = ["7dr7299-mtk", "7dr7299-mt76"]
+mode = "nested"
+directories = ["luci-app-openclash"]
+
 # 内存释放（LuCI 页面 + drop_caches）
 [ramfree]
 repository = "https://github.com/sbwml/luci-app-ramfree.git"
