@@ -1,7 +1,7 @@
 # 构建与清理
 
 # 定时构建
-scheduled_builds = true
+scheduled_builds = false
 
 # 并行机型数
 max_parallel = 10
