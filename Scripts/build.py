@@ -616,6 +616,24 @@ def apply_defaults(tree, values, vendor=False, wireless_defaults=None, exclude_u
             content, count = re.subn(r"^(set \$\{si\}\." + key + r"=).*$", lambda m: m[1] + "'" + value + "'", content, flags=re.M)
             if count != 1:
                 raise ValueError("mac80211 " + key + " defaults changed upstream")
+        # 5GHz 频宽：上游把 >80MHz 一律压到 80，这里按机型放开到指定宽度
+        width_5g = int(values.get("wifi_5g_width", 80))
+        if width_5g not in (80, 160):
+            raise ValueError("wifi_5g_width must be 80 or 160")
+        width_default = "\t\telse if (width > 80)\n\t\t\twidth = 80;"
+        width_override = ("\t\telse if (band_name == \"5G\" && width > " + str(width_5g) + ")\n"
+                          "\t\t\twidth = " + str(width_5g) + ";\n" + width_default)
+        if content.count(width_default) != 1:
+            raise ValueError("mac80211 channel width defaults changed upstream")
+        content = content.replace(width_default, width_override, 1)
+        # 国家码：决定可用信道集合与发射功率上限
+        country = str(values.get("wifi_country", "CN")).upper()
+        if not re.fullmatch(r"[A-Z]{2}", country):
+            raise ValueError("wifi_country must be a two-letter country code")
+        content, count = re.subn(r"\bcountry\s*\|\|\s*'[A-Z0-9]{2}'",
+                                 "country || '" + country + "'", content)
+        if count != 1:
+            raise ValueError("mac80211 country fallback changed upstream")
         path.write_text(content)
     overlay = tree / "files/etc/uci-defaults"
     overlay.mkdir(parents=True, exist_ok=True)
