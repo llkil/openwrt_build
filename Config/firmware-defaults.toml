@@ -12,6 +12,12 @@ wifi_password = "12345678"
 # 无线加密
 wifi_encryption = "psk2"
 
+# 无线国家代码（两位 ISO 码，决定可用信道与功率上限）
+wifi_country = "CN"
+
+# 5GHz 默认信道宽度；仅当驱动与该国家码允许 160MHz 时生效
+wifi_5g_width = 160
+
 # 关闭无线
 wifi_disabled = false
 
