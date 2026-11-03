@@ -27,6 +27,9 @@ network_tuning = true
 ccache_group = "viking-filogic"
 ccache_priority = 30
 
+# DAWN 运行时修正：适配新版 hostapd 的 BSS socket 目录，并关闭 Beacon 测量默认值
+patches = ["Scripts/Patches/dawn-runtime-fixes.patch"]
+
 # 完整机型配置
 config = "Config/TPLINK-7DR7299-MT76.txt"
 
