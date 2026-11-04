@@ -1,0 +1,3 @@
+config settings 'settings'
+	option retention_days '2'
+	option max_mb '8'

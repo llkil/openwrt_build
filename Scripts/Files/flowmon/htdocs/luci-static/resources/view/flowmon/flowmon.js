@@ -195,9 +195,9 @@ return view.extend({
 		]);
 
 		/* 表头与表体必须在同一个 <table> 内, 否则列宽各算各的, 上下永远对不齐 */
-		var mkTable = function (title, heads, body, rightFrom) {
+		var mkTable = function (title, heads, body, rightFrom, titleEl) {
 			return E('div', { 'class': 'cbi-map' }, [
-				E('h3', {}, title),
+				titleEl || E('h3', {}, title),
 				E('table', { 'class': 'table' }, [
 					E('thead', {}, [
 						E('tr', { 'class': 'tr table-titles' }, heads.map(function (h, i) {
@@ -212,15 +212,42 @@ return view.extend({
 			]);
 		};
 
+		/* 历史范围控件: 日期选择 + 保留天数; 选单日时按小时展示, 选全部时按天展示 */
+		var rangeSel = E('select', { 'class': 'cbi-input-select' }, [
+			E('option', { 'value': '' }, '全部（累计）')
+		]);
+		var keepSel = E('select', { 'class': 'cbi-input-select' }, [2, 7, 14, 30].map(function (n) {
+			return E('option', { 'value': String(n) }, n + ' 天');
+		}));
+		var usageNote = E('span', { 'style': 'color:#777;font-size:.9em' }, '');
+		var rangesNote = E('span', { 'style': 'color:#777;font-size:.9em' }, '历史数据保留 2 天');
+
+		var controls = E('div', {
+			'style': 'display:flex;gap:.6em;align-items:center;flex-wrap:wrap;margin-bottom:1em'
+		}, [
+			E('label', {}, '历史范围'), rangeSel,
+			E('label', { 'style': 'margin-left:1em' }, '保留天数'), keepSel,
+			usageNote
+		]);
+
+		var hoursTitle = E('h3', {}, '全屋分时段');
+		var histTitle = E('h3', {}, '客户端累计');
+		var historyDate = '';
+
 		var root = E('div', {}, [
 			E('h2', {}, '实时流量（按客户端）'),
-			E('p', {}, '基于 nft 钩子层字节计数（forward + TPROXY input/output），每 2 秒采样；历史数据保留 2 天。经过代理（Xray/PassWall）的流量计入发起客户端。'),
+			E('p', {}, [
+				'基于 nft 钩子层字节计数（forward + TPROXY input/output），每 2 秒采样；',
+				rangesNote,
+				'。经过代理（Xray/PassWall）的流量计入发起客户端。'
+			]),
 			staleNote,
 			header,
 			sparkBox,
+			controls,
 			mkTable('客户端实时速率', ['客户端', 'IP', '↓ 速率', '↑ 速率', '今日累计 ↓/↑'], liveBody, 2),
-			mkTable('近 48h 客户端累计', ['客户端', 'IP', '↓ 累计', '↑ 累计', '合计'], histBody, 2),
-			mkTable('全屋分时段（每 6 小时）', ['时段', '↓ 流量', '↑ 流量'], hoursBody, 1)
+			mkTable('客户端累计', ['客户端', 'IP', '↓ 累计', '↑ 累计', '合计'], histBody, 2, histTitle),
+			mkTable('全屋分时段', ['时段', '↓ 流量', '↑ 流量'], hoursBody, 1, hoursTitle)
 		]);
 
 		poll.add(function () {
@@ -270,28 +297,33 @@ return view.extend({
 		}, 2);
 
 		var loadHistory = function () {
-			return fs.exec('/usr/libexec/flowmon-panel', ['history']).then(function (res) {
+			var args = historyDate ? ['history', historyDate] : ['history'];
+			return fs.exec('/usr/libexec/flowmon-panel', args).then(function (res) {
 				var d;
 				try { d = JSON.parse(res.stdout); } catch (e) { return; }
 				if (!d) return;
 				buildClientTable(histBody, d.clients || [], 'hist');
-				/* 每小时聚合为 6 小时粒度 */
+				histTitle.textContent = historyDate ? ('客户端累计 ' + historyDate)
+				                                    : '客户端累计（全部保留期）';
+				/* 单日 -> 每小时一格; 全部 -> 每天一格 */
 				var buckets = {}, order = [];
 				var hours = d.hours || [];
 				for (var i = 0; i < hours.length; i++) {
 					var h = hours[i].h || '';
 					var day = h.substring(0, 10), hh = parseInt(h.substring(11, 13), 10) || 0;
-					var slot = day + ' ' + (Math.floor(hh / 6) * 6);
-					var key = slot + ':00';
+					var key = historyDate ? (hh < 10 ? '0' + hh : String(hh)) + ':00' : day;
 					if (!buckets[key]) { buckets[key] = { rx: 0, tx: 0 }; order.push(key); }
 					buckets[key].rx += hours[i].rx;
 					buckets[key].tx += hours[i].tx;
 				}
+				order.sort();
 				var rows = [];
 				for (var j = 0; j < order.length; j++) {
 					var k = order[j];
 					rows.push([k, fmtBytes(buckets[k].rx * 1024), fmtBytes(buckets[k].tx * 1024)]);
 				}
+				hoursTitle.textContent = historyDate ? ('全屋分时段 ' + historyDate + '（每小时）')
+				                                     : '全屋分时段（每天）';
 				while (hoursBody.firstChild) { hoursBody.removeChild(hoursBody.firstChild); }
 				for (var m = rows.length - 1; m >= 0; m--) {
 					var tr = hoursBody.appendChild(E('tr', { 'class': 'tr' }));
@@ -307,6 +339,54 @@ return view.extend({
 			}).catch(function () { });
 		};
 
+		/* 可用日期列表 + 当前保留设置（日期降序，最新在前） */
+		var loadDates = function () {
+			return fs.exec('/usr/libexec/flowmon-panel', ['dates']).then(function (res) {
+				var d;
+				try { d = JSON.parse(res.stdout); } catch (e) { return; }
+				if (!d) return;
+				var days = (d.days || []).slice().sort().reverse();
+				while (rangeSel.firstChild) rangeSel.removeChild(rangeSel.firstChild);
+				rangeSel.appendChild(E('option', { 'value': '' }, '全部（累计 ' + days.length + ' 天）'));
+				for (var i = 0; i < days.length; i++) {
+					rangeSel.appendChild(E('option', { 'value': days[i] }, days[i]));
+				}
+				rangeSel.value = historyDate;
+				/* 保留天数可能被 SSH 改成 1/3/60/90 这类非预设值，重建时补进去，
+				   否则 <select> 会静默显示成第一个选项，误导用户 */
+				while (keepSel.firstChild) keepSel.removeChild(keepSel.firstChild);
+				var keepOpts = [2, 7, 14, 30], cur = Number(d.retention) || 2;
+				if (keepOpts.indexOf(cur) < 0) keepOpts.push(cur);
+				keepOpts.sort(function (a, b) { return a - b; });
+				for (var q = 0; q < keepOpts.length; q++) {
+					keepSel.appendChild(E('option', { 'value': String(keepOpts[q]) }, keepOpts[q] + ' 天'));
+				}
+				keepSel.value = String(cur);
+				rangesNote.textContent = '历史数据保留 ' + cur + ' 天';
+				usageNote.textContent = d.used_kb ? '· 已占用 ' + fmtBytes(d.used_kb * 1024) : '';
+			}).catch(function () { });
+		};
+
+		rangeSel.addEventListener('change', function () {
+			historyDate = rangeSel.value || '';
+			loadHistory();
+		});
+
+		keepSel.addEventListener('change', function () {
+			var n = keepSel.value;
+			keepSel.disabled = true;
+			fs.exec('/usr/libexec/flowmon-panel', ['setretention', n]).then(function (res) {
+				var d;
+				try { d = JSON.parse(res.stdout); } catch (e) { d = null; }
+				if (!d || d.error) throw new Error('setretention failed');
+				return loadDates();
+			}).then(function () {
+				return loadHistory();
+			}).catch(function () {
+				ui.showNotification(null, 'flowmon: 修改保留天数失败');
+			}).then(function () { keepSel.disabled = false; });
+		});
+
 		/* 页面加载时先从采集器拉一次环形缓冲, 刷新/换设备都能看到历史波形 */
 		var loadSeries = function () {
 			return fs.exec('/usr/libexec/flowmon-panel', ['series']).then(function (res) {
@@ -321,8 +401,10 @@ return view.extend({
 
 		drawSpark();
 		loadSeries();
-		loadHistory();
+		loadDates().then(loadHistory);
 		poll.add(loadHistory, 60);
+		/* 跨天后新日期要出现在下拉框里，每小时重扫一次文件列表 */
+		poll.add(loadDates, 3600);
 
 		return root;
 	},

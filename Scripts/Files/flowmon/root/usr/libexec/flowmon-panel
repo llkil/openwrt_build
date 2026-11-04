@@ -1,10 +1,21 @@
 #!/bin/sh
 # flowmon-panel — LuCI RPC 入口
-#   live     当前实时速率 JSON
-#   history  最近 48h 聚合 JSON
+#   live             当前实时速率 JSON
+#   series           波形环形缓冲
+#   history [日期]   聚合 JSON（无参=全部保留期，YYYY-MM-DD=仅该日）
+#   dates            可用日期列表 + 当前保留设置
+#   setretention N   修改保留天数并重启采集器（N ∈ 1/2/3/7/14/30/60/90）
 
 RUN=/tmp/flowmon
 DATA=/overlay/flowmon
+
+retention_days() {
+    R=$(uci -q get flowmon.settings.retention_days 2>/dev/null)
+    case "$R" in
+        1|2|3|7|14|30|60|90) echo "$R" ;;
+        *) echo 2 ;;
+    esac
+}
 
 case "$1" in
 live)
@@ -26,6 +37,7 @@ series)
     ;;
 
 history)
+    WANT="$2"
     TMP=/tmp/flowmon/hist.tmp
     mkdir -p "$RUN"
     : > "$TMP"
@@ -33,6 +45,7 @@ history)
         [ -f "$f" ] || continue
         d=${f##*/}
         d=${d%.csv}
+        [ -n "$WANT" ] && [ "$d" != "$WANT" ] && continue
         awk -F, -v day="$d" '
         NF >= 4 && $2 != "" {
             printf "c_%s %d %d\n", $2, $3, $4
@@ -70,8 +83,38 @@ history)
     echo
     ;;
 
+dates)
+    R=$(retention_days)
+    USED=$(du -sk "$DATA" 2>/dev/null | awk '{print $1}')
+    printf '{"retention":%s,"used_kb":%s,"days":[' "$R" "${USED:-0}"
+    FIRST=1
+    for f in "$DATA"/*.csv; do
+        [ -f "$f" ] || continue
+        d=${f##*/}
+        d=${d%.csv}
+        [ $FIRST -eq 1 ] || printf ','
+        printf '"%s"' "$d"
+        FIRST=0
+    done
+    printf ']}\n'
+    ;;
+
+setretention)
+    N="$2"
+    case "$N" in
+        1|2|3|7|14|30|60|90) ;;
+        *) echo '{"error":"unsupported retention"}'; exit 1 ;;
+    esac
+    uci -q set flowmon.settings.retention_days="$N"
+    uci -q commit flowmon
+    # 重启采集器让新保留期生效（启动时会立即清理一次过期/超限文件）
+    ( /etc/init.d/flowmon restart >/dev/null 2>&1 & )
+    sleep 2
+    echo "{\"retention\":$N}"
+    ;;
+
 *)
-    echo "usage: flowmon-panel live|series|history"
+    echo "usage: flowmon-panel live|series|history [date]|dates|setretention <days>"
     exit 1
     ;;
 esac
