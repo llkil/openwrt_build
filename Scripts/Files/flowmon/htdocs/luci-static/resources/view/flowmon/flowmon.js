@@ -21,15 +21,7 @@ function fmtBytes(b) {
 	return b.toFixed(i ? 2 : 0) + ' ' + u[i];
 }
 
-var MAXPTS = 300;  /* 10 分钟窗口, 与采集器 spark.txt 保留条数一致 */
-
-function svgEl(tag, attrs) {
-	var el = document.createElementNS('http://www.w3.org/2000/svg', tag);
-	for (var k in attrs) el.setAttribute(k, attrs[k]);
-	return el;
-}
-
-/* 把峰值抬到 1/2/2.5/5/10 x 10^n 的整刻度, 避免曲线贴顶或抖动 */
+/* 把峰值抬到 1/2/2.5/5/10 x 10^n 的整刻度, 避免柱子贴顶 */
 function niceMax(v) {
 	if (!(v > 0)) return 1024;
 	var e = Math.pow(10, Math.floor(Math.log(v) / Math.LN10));
@@ -106,85 +98,70 @@ return view.extend({
 			summaryCard(cpuFreq, 'CPU 频率')
 		]);
 
-		/* ---- 全屋速率趋势波形 (SVG, 无外部依赖) ---- */
-		var sparkData = [];
-		var lastTs = 0;
-		var sparkSvg = svgEl('svg', {
-			'viewBox': '0 0 800 150',
-			'preserveAspectRatio': 'none',
-			'style': 'display:block;width:100%;height:150px'
+		/* ---- 全屋分时速率: 0–24 时, 每小时平均 bps ---- */
+		var hourly = [];               /* 24 × {rx,tx} bps */
+		var chartDate = '';
+		var hourTitle = E('h3', { 'style': 'margin:0' }, '全屋分时速率');
+		var hourPeak = E('span', { 'style': 'opacity:.7;font-size:.85em' }, '');
+		var hourPlot = E('div', {
+			'style': 'position:relative;height:150px;display:flex;align-items:flex-end;gap:2px;' +
+				'border-bottom:1px solid rgba(128,128,128,.35);' +
+				'background:linear-gradient(to top,rgba(128,128,128,.16) 0 1px,transparent 1px);' +
+				'background-size:100% 25%;background-repeat:repeat-y'
 		});
-		var sparkPeak = E('span', { 'style': 'opacity:.7;font-size:.85em' }, '');
-		var sparkSpan = E('span', { 'style': 'opacity:.55;font-size:.8em' }, '');
+		var hourAxis = E('div', { 'style': 'position:relative;display:flex;gap:2px;margin-top:3px' });
 
-		var drawSpark = function () {
-			var W = 800, H = 150, PT = 8, PB = 4, HH = H - PT - PB;
-			var n = sparkData.length;
-			while (sparkSvg.firstChild) sparkSvg.removeChild(sparkSvg.firstChild);
+		var drawHourly = function () {
+			while (hourPlot.firstChild) hourPlot.removeChild(hourPlot.firstChild);
+			while (hourAxis.firstChild) hourAxis.removeChild(hourAxis.firstChild);
 
-			for (var g = 0; g <= 4; g++) {
-				var gy = PT + HH * g / 4;
-				sparkSvg.appendChild(svgEl('line', {
-					'x1': 0, 'y1': gy, 'x2': W, 'y2': gy,
-					'stroke': 'currentColor',
-					'stroke-opacity': (g === 4 ? 0.22 : 0.08),
-					'stroke-width': 1,
-					'vector-effect': 'non-scaling-stroke'
-				}));
+			var max = 0, pkSum = -1, pkH = 0;
+			for (var i = 0; i < 24; i++) {
+				var o = hourly[i] || { 'rx': 0, 'tx': 0 };
+				if (o.rx > max) max = o.rx;
+				if (o.tx > max) max = o.tx;
+				if (o.rx + o.tx > pkSum) { pkSum = o.rx + o.tx; pkH = i; }
 			}
+			var yMax = niceMax(max);
 
-			if (n < 2) {
-				sparkPeak.textContent = n ? ('当前 ↓ ' + fmtBps(sparkData[0].rx) + ' / ↑ ' + fmtBps(sparkData[0].tx)) : '';
-				sparkSpan.textContent = n ? '等待更多采样…' : '';
-				return;
+			var bars = [['rx', '#2f86d8'], ['tx', '#f08c2e']];
+			for (var h = 0; h < 24; h++) {
+				var v = hourly[h] || { 'rx': 0, 'tx': 0 };
+				var slot = E('div', {
+					'style': 'flex:1;height:100%;display:flex;align-items:flex-end;justify-content:center;gap:1px',
+					'title': h + ':00  ↓ ' + fmtBps(v.rx) + '  ↑ ' + fmtBps(v.tx)
+				});
+				for (var b = 0; b < 2; b++) {
+					var val = v[bars[b][0]];
+					slot.appendChild(E('div', {
+						'style': 'width:44%;height:' + (yMax > 0 ? Math.min(val / yMax, 1) * 100 : 0) + '%;' +
+							'min-height:' + (val > 0 ? '1px' : '0') + ';' +
+							'background:' + bars[b][1] + ';border-radius:1px 1px 0 0'
+					}));
+				}
+				hourPlot.appendChild(slot);
+
+				hourAxis.appendChild(E('div', {
+					'style': 'flex:1;text-align:center;font-size:.72em;opacity:.6;white-space:nowrap'
+				}, h % 3 === 0 ? String(h) : ''));
 			}
+			/* 右端补 24 时刻度, 坐标读作 0–24 */
+			hourAxis.appendChild(E('span', {
+				'style': 'position:absolute;right:-2px;bottom:0;font-size:.72em;opacity:.6'
+			}, '24'));
 
-			var peakRx = 0, peakTx = 0;
-			for (var i = 0; i < n; i++) {
-				if (sparkData[i].rx > peakRx) peakRx = sparkData[i].rx;
-				if (sparkData[i].tx > peakTx) peakTx = sparkData[i].tx;
+			if (max <= 0) {
+				hourPeak.textContent = '当日暂无采样数据';
+			} else {
+				hourPeak.textContent = '峰值 ' + pkH + ':00  ↓ ' + fmtBps(hourly[pkH].rx) +
+					' / ↑ ' + fmtBps(hourly[pkH].tx);
 			}
-			var top = niceMax(Math.max(peakRx, peakTx));
-
-			/* 点数不足时铺满整宽, 满窗(300 点)后按固定步长向左滚动 */
-			var win = Math.min(n, MAXPTS);
-			var xAt = function (i) { return win > 1 ? i / (win - 1) * W : W; };
-			var yAt = function (v) { return PT + (1 - Math.min(v / top, 1)) * HH; };
-			var base = PT + HH;
-
-			var series = [
-				{ k: 'tx', c: '#f08c2e', f: 'rgba(240,140,46,0.15)' },
-				{ k: 'rx', c: '#2f86d8', f: 'rgba(47,134,216,0.17)' }
-			];
-
-			/* 先铺面积, 再压折线, 避免互相遮挡 */
-			for (var s = 0; s < series.length; s++) {
-				var dd = '';
-				for (var j = 0; j < n; j++)
-					dd += (j ? 'L' : 'M') + xAt(j).toFixed(1) + ',' + yAt(sparkData[j][series[s].k]).toFixed(1);
-				sparkSvg.appendChild(svgEl('path', {
-					'd': dd + 'L' + xAt(n - 1).toFixed(1) + ',' + base + 'L' + xAt(0).toFixed(1) + ',' + base + 'Z',
-					'fill': series[s].f, 'stroke': 'none'
-				}));
-			}
-			for (var t = 0; t < series.length; t++) {
-				var pd = '';
-				for (var m = 0; m < n; m++)
-					pd += (m ? 'L' : 'M') + xAt(m).toFixed(1) + ',' + yAt(sparkData[m][series[t].k]).toFixed(1);
-				sparkSvg.appendChild(svgEl('path', {
-					'd': pd, 'fill': 'none', 'stroke': series[t].c,
-					'stroke-width': 1.8, 'stroke-linejoin': 'round', 'stroke-linecap': 'round',
-					'vector-effect': 'non-scaling-stroke'
-				}));
-			}
-
-			sparkPeak.textContent = '窗口峰值 ↓ ' + fmtBps(peakRx) + ' / ↑ ' + fmtBps(peakTx);
-			sparkSpan.textContent = '最近 ' + (n * 2 >= 60 ? Math.round(n * 2 / 60) + ' 分钟' : (n * 2) + ' 秒') + '（每 2 秒采样）';
+			hourTitle.textContent = '全屋分时速率' + (chartDate ? ' · ' + chartDate : '') + '（每小时平均，0–24 时）';
 		};
 
-		var sparkBox = E('div', { 'class': 'cbi-map', 'style': 'margin-bottom:1.2em' }, [
-			E('div', { 'style': 'display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:10px;margin-bottom:.3em' }, [
-				E('h3', { 'style': 'margin:0' }, '全屋实时速率趋势'),
+		var hourBox = E('div', { 'class': 'cbi-map', 'style': 'margin-bottom:1.2em' }, [
+			E('div', { 'style': 'display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:10px;margin-bottom:.5em' }, [
+				hourTitle,
 				E('div', { 'style': 'display:flex;gap:14px;align-items:baseline;flex-wrap:wrap' }, [
 					E('span', { 'style': 'font-size:.85em' }, [
 						E('span', { 'style': 'display:inline-block;width:10px;height:10px;border-radius:2px;background:#2f86d8;margin-right:5px;vertical-align:middle' }),
@@ -194,11 +171,11 @@ return view.extend({
 						E('span', { 'style': 'display:inline-block;width:10px;height:10px;border-radius:2px;background:#f08c2e;margin-right:5px;vertical-align:middle' }),
 						'上行'
 					]),
-					sparkPeak
+					hourPeak
 				])
 			]),
-			sparkSvg,
-			E('div', { 'style': 'display:flex;justify-content:flex-end;margin-top:2px' }, sparkSpan)
+			hourPlot,
+			hourAxis
 		]);
 
 		/* 表头与表体必须在同一个 <table> 内, 否则列宽各算各的, 上下永远对不齐 */
@@ -256,7 +233,7 @@ return view.extend({
 			]),
 			staleNote,
 			header,
-			sparkBox,
+			hourBox,
 			controls,
 			mkTable('客户端实时速率', ['客户端', 'IP', '↓ 速率', '↑ 速率', '今日累计 ↓/↑'], liveBody, 2),
 			mkTable('客户端累计', ['客户端', 'IP', '↓ 累计', '↑ 累计', '合计'], histBody, 2, histTitle),
@@ -286,18 +263,6 @@ return view.extend({
 				cpuUsage.textContent = (d.cpu && d.cpu.usage != null) ? d.cpu.usage.toFixed(1) + ' %' : '-';
 				cpuFreq.textContent = (d.cpu && d.cpu.mhz) ? (d.cpu.mhz + ' MHz') : '-';
 
-				/* 波形: 仅在新采样点时追加, 避免同一 tick 重复画 */
-				if (d.ts && d.ts > lastTs) {
-					lastTs = d.ts;
-					sparkData.push({
-						't': d.ts,
-						'rx': Number(d.total && d.total.rx) || 0,
-						'tx': Number(d.total && d.total.tx) || 0
-					});
-					if (sparkData.length > MAXPTS) sparkData.shift();
-					drawSpark();
-				}
-
 				var cl = (d.clients || []).slice();
 				cl.unshift({
 					ip: '__ROUTER__',
@@ -321,6 +286,26 @@ return view.extend({
 				/* 单日 -> 每小时一格; 全部 -> 每天一格 */
 				var buckets = {}, order = [];
 				var hours = d.hours || [];
+
+				/* 分时柱: 固定画 chartDate 这一天（全部模式取今天）, 缺的钟点补 0 */
+				chartDate = historyDate || ymd(new Date());
+				hourly = [];
+				for (var z = 0; z < 24; z++) hourly.push({ 'rx': 0, 'tx': 0 });
+				for (var q = 0; q < hours.length; q++) {
+					var hq = hours[q].h || '';
+					if (hq.substring(0, 10) !== chartDate) continue;
+					var hr = parseInt(hq.substring(11, 13), 10);
+					if (!(hr >= 0 && hr < 24)) continue;
+					hourly[hr].rx += Number(hours[q].rx) || 0;
+					hourly[hr].tx += Number(hours[q].tx) || 0;
+				}
+				/* CSV 存 KiB: KiB×1024×8÷3600 = 该小时平均 bps */
+				for (var u = 0; u < 24; u++) {
+					hourly[u].rx = hourly[u].rx * 1024 * 8 / 3600;
+					hourly[u].tx = hourly[u].tx * 1024 * 8 / 3600;
+				}
+				drawHourly();
+
 				for (var i = 0; i < hours.length; i++) {
 					var h = hours[i].h || '';
 					var day = h.substring(0, 10), hh = parseInt(h.substring(11, 13), 10) || 0;
@@ -420,20 +405,7 @@ return view.extend({
 			}).then(function () { keepSel.disabled = false; });
 		});
 
-		/* 页面加载时先从采集器拉一次环形缓冲, 刷新/换设备都能看到历史波形 */
-		var loadSeries = function () {
-			return fs.exec('/usr/libexec/flowmon-panel', ['series']).then(function (res) {
-				var d;
-				try { d = JSON.parse(res.stdout); } catch (e) { return; }
-				if (!d || !d.points) return;
-				sparkData = d.points.slice(-MAXPTS);
-				if (sparkData.length) lastTs = sparkData[sparkData.length - 1].t;
-				drawSpark();
-			}).catch(function () { });
-		};
-
-		drawSpark();
-		loadSeries();
+		drawHourly();
 		loadDates().then(loadHistory);
 		poll.add(loadHistory, 60);
 		/* 跨天后日历的 max 要跟进到新的"今天"，每小时重扫一次 */
