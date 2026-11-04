@@ -21,12 +21,12 @@ function fmtBytes(b) {
 	return b.toFixed(i ? 2 : 0) + ' ' + u[i];
 }
 
-/* 把峰值抬到 1/2/2.5/5/10 x 10^n 的整刻度, 避免曲线贴顶 */
+/* 把峰值抬到 1/2/2.5/3/5/10 x 10^n 的整刻度; 少了 3 这一档, 峰值落在 2.1~3 之间会白扔四成高度 */
 function niceMax(v) {
 	if (!(v > 0)) return 1024;
 	var e = Math.pow(10, Math.floor(Math.log(v) / Math.LN10));
 	var n = v / e;
-	var m = n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10;
+	var m = n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 3 ? 3 : n <= 5 ? 5 : 10;
 	return m * e;
 }
 
@@ -147,7 +147,7 @@ return view.extend({
 			return c;
 		};
 
-		var dayChart = mkChart('全屋分时速率（折线）');
+		var liveChart = mkChart('实时速率');
 		var barChart = mkChart('分时柱状');
 
 		var SERIES = [
@@ -155,37 +155,44 @@ return view.extend({
 			['tx', '#f08c2e', 'rgba(240,140,46,.15)']
 		];
 
-		/* 当前小时只过了几分钟, 用 3600 当分母会把尾巴压成假的低谷;
-		   按已过秒数折算, 整点对齐后自然收敛到真值 */
-		var curHourSecs = function (day, hour, now) {
-			if (day !== ymd(now) || hour !== now.getHours()) return 3600;
-			return Math.max(now.getMinutes() * 60 + now.getSeconds(), 120);
+		/* ---- 实时波形: 最近 10 分钟, 每 2 秒一个点 (与采集器 spark.txt 条数一致) ---- */
+		var MAXPTS = 300;
+		var sparkData = [];
+		var lastTs = 0;
+
+		var pad2 = function (n) { return (n < 10 ? '0' : '') + n; };
+		var hms = function (t) {
+			var d = new Date(t * 1000);
+			return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
 		};
 
-		/* 通用绘制: slots 定长, 每格一个点, 点居格中; 无采集的格子断开折线 */
-		var paintSeries = function (chart, slots, opt) {
+		var drawSpark = function () {
 			var W = 800, H = 150, PT = 8, PB = 4, HH = H - PT - PB, BASE = PT + HH;
-			var n = slots.length;
-			while (chart.svg.firstChild) chart.svg.removeChild(chart.svg.firstChild);
-			while (chart.axis.firstChild) chart.axis.removeChild(chart.axis.firstChild);
+			while (liveChart.svg.firstChild) liveChart.svg.removeChild(liveChart.svg.firstChild);
+			while (liveChart.axis.firstChild) liveChart.axis.removeChild(liveChart.axis.firstChild);
 
-			var max = 0, pkSum = -1, pkH = 0, pts = 0;
-			for (var i = 0; i < n; i++) {
-				var s0 = slots[i];
-				if (!s0 || !s0.has) continue;
-				pts++;
-				if (s0.rx > max) max = s0.rx;
-				if (s0.tx > max) max = s0.tx;
-				if (s0.rx + s0.tx > pkSum) { pkSum = s0.rx + s0.tx; pkH = i; }
+			var n = sparkData.length;
+			var win = Math.min(n, MAXPTS);
+			if (win < 1) {
+				liveChart.scale.textContent = '';
+				liveChart.peak.textContent = '等待采样…';
+				return;
 			}
-			/* 允许外部指定刻度: 折线与柱状并排时必须同标度, 否则两张图无法横向对比 */
-			var yMax = (opt && opt.yMax > 0) ? opt.yMax : niceMax(max);
-			var xAt = function (k) { return (k + 0.5) / n * W; };
+			var start = n - win;
+			var pkRx = 0, pkTx = 0;
+			for (var i = 0; i < win; i++) {
+				var p = sparkData[start + i];
+				if (p.rx > pkRx) pkRx = p.rx;
+				if (p.tx > pkTx) pkTx = p.tx;
+			}
+			var yMax = niceMax(Math.max(pkRx, pkTx));
+			/* 铺满整个宽度: 刚打开时只有几十个点也不留白, 与最初那版一致 */
+			var xAt = function (k) { return win > 1 ? k / (win - 1) * W : W; };
 			var yAt = function (v) { return PT + (1 - Math.min(v / yMax, 1)) * HH; };
 
 			for (var g = 0; g <= 4; g++) {
 				var gy = PT + HH * g / 4;
-				chart.svg.appendChild(svgEl('line', {
+				liveChart.svg.appendChild(svgEl('line', {
 					'x1': 0, 'y1': gy, 'x2': W, 'y2': gy,
 					'stroke': 'currentColor',
 					'stroke-opacity': (g === 4 ? 0.28 : 0.1),
@@ -193,20 +200,22 @@ return view.extend({
 					'vector-effect': 'non-scaling-stroke'
 				}));
 			}
-			for (var vx = 0; vx <= n; vx += opt.vstep) {
-				chart.svg.appendChild(svgEl('line', {
-					'x1': vx / n * W, 'y1': PT, 'x2': vx / n * W, 'y2': BASE,
+			/* 每 30 个点(约 1 分钟)一条竖线, 给个时间参照 */
+			for (var vx = 0; vx < win; vx += 30) {
+				liveChart.svg.appendChild(svgEl('line', {
+					'x1': xAt(vx), 'y1': PT, 'x2': xAt(vx), 'y2': BASE,
 					'stroke': 'currentColor', 'stroke-opacity': 0.07,
 					'stroke-width': 1, 'vector-effect': 'non-scaling-stroke'
 				}));
 			}
 
-			var segs = [], cur = [];
-			for (var j = 0; j < n; j++) {
-				if (slots[j] && slots[j].has) cur.push(j);
-				else if (cur.length) { segs.push(cur); cur = []; }
+			/* 采集中断(重启/卡顿)处断线, 否则会把两段连成一条假直线 */
+			var segs = [], cur = [0];
+			for (var j = 1; j < win; j++) {
+				if (sparkData[start + j].t - sparkData[start + j - 1].t > 8) { segs.push(cur); cur = [j]; }
+				else cur.push(j);
 			}
-			if (cur.length) segs.push(cur);
+			segs.push(cur);
 
 			/* 先铺面积再压线, 避免两色互相遮挡 */
 			for (var a = 0; a < SERIES.length; a++) {
@@ -215,9 +224,9 @@ return view.extend({
 					var ga = segs[sa];
 					if (ga.length < 2) continue;
 					var dd = '';
-					for (var p = 0; p < ga.length; p++)
-						dd += (p ? 'L' : 'M') + xAt(ga[p]).toFixed(1) + ',' + yAt(slots[ga[p]][ka]).toFixed(1);
-					chart.svg.appendChild(svgEl('path', {
+					for (var q = 0; q < ga.length; q++)
+						dd += (q ? 'L' : 'M') + xAt(ga[q]).toFixed(1) + ',' + yAt(sparkData[start + ga[q]][ka]).toFixed(1);
+					liveChart.svg.appendChild(svgEl('path', {
 						'd': dd + 'L' + xAt(ga[ga.length - 1]).toFixed(1) + ',' + BASE +
 							'L' + xAt(ga[0]).toFixed(1) + ',' + BASE + 'Z',
 						'fill': SERIES[a][2], 'stroke': 'none'
@@ -228,43 +237,44 @@ return view.extend({
 				var kt = SERIES[t][0];
 				for (var st = 0; st < segs.length; st++) {
 					var gt = segs[st];
-					if (!gt.length) continue;
-					/* 孤立单点画一小段短线, 否则那一格什么都看不见 */
-					if (gt.length === 1) {
-						chart.svg.appendChild(svgEl('line', {
-							'x1': xAt(gt[0]) - 1.5, 'y1': yAt(slots[gt[0]][kt]),
-							'x2': xAt(gt[0]) + 1.5, 'y2': yAt(slots[gt[0]][kt]),
-							'stroke': SERIES[t][1], 'stroke-width': 2.4, 'stroke-linecap': 'round',
-							'vector-effect': 'non-scaling-stroke'
-						}));
-						continue;
-					}
+					if (gt.length < 2) continue;
 					var pd = '';
-					for (var q = 0; q < gt.length; q++)
-						pd += (q ? 'L' : 'M') + xAt(gt[q]).toFixed(1) + ',' + yAt(slots[gt[q]][kt]).toFixed(1);
-					chart.svg.appendChild(svgEl('path', {
+					for (var e = 0; e < gt.length; e++)
+						pd += (e ? 'L' : 'M') + xAt(gt[e]).toFixed(1) + ',' + yAt(sparkData[start + gt[e]][kt]).toFixed(1);
+					liveChart.svg.appendChild(svgEl('path', {
 						'd': pd, 'fill': 'none', 'stroke': SERIES[t][1],
-						'stroke-width': 1.8, 'stroke-linejoin': 'round', 'stroke-linecap': 'round',
+						'stroke-width': 1.6, 'stroke-linejoin': 'round', 'stroke-linecap': 'round',
 						'vector-effect': 'non-scaling-stroke'
 					}));
 				}
 			}
 
-			/* 悬停热区: 每格一个透明矩形 + 原生 title */
-			for (var hz = 0; hz < n; hz++) {
-				var rect = svgEl('rect', {
-					'x': (hz / n * W).toFixed(1), 'y': PT,
-					'width': (W / n).toFixed(1), 'height': HH, 'fill': 'transparent'
-				});
-				var ttl = svgEl('title', {});
-				ttl.textContent = opt.tip(hz, slots[hz]);
-				rect.appendChild(ttl);
-				chart.svg.appendChild(rect);
-			}
+			liveChart.scale.textContent = fmtBps(yMax);
+			liveChart.peak.textContent = '峰值 ↓ ' + fmtBps(pkRx) + ' / ↑ ' + fmtBps(pkTx);
+			liveChart.axis.appendChild(E('span', {
+				'style': 'position:absolute;left:0;top:0;font-size:.72em;opacity:.6;white-space:nowrap'
+			}, hms(sparkData[start].t)));
+			liveChart.axis.appendChild(E('span', {
+				'style': 'position:absolute;right:0;top:0;font-size:.72em;opacity:.6;white-space:nowrap'
+			}, '现在 ' + hms(sparkData[n - 1].t)));
+		};
 
-			chart.scale.textContent = max > 0 ? fmtBps(yMax) : '';
-			chart.peak.textContent = pts ? opt.peak(pkH) : '暂无采样数据';
-			return { 'max': max, 'pts': pts, 'pkH': pkH, 'yMax': yMax };
+		var loadSeries = function () {
+			return fs.exec('/usr/libexec/flowmon-panel', ['series']).then(function (res) {
+				var d;
+				try { d = JSON.parse(res.stdout); } catch (e) { return; }
+				if (!d || !d.points) return;
+				sparkData = d.points.slice(-MAXPTS);
+				if (sparkData.length) lastTs = sparkData[sparkData.length - 1].t;
+				drawSpark();
+			}).catch(function () { });
+		};
+
+		/* 当前小时只过了几分钟, 用 3600 当分母会把尾巴压成假的低谷;
+		   按已过秒数折算, 整点对齐后自然收敛到真值 */
+		var curHourSecs = function (day, hour, now) {
+			if (day !== ymd(now) || hour !== now.getHours()) return 3600;
+			return Math.max(now.getMinutes() * 60 + now.getSeconds(), 120);
 		};
 
 		/* 刻度落在格边界(0/6/12/18/24) */
@@ -278,7 +288,7 @@ return view.extend({
 			}
 		};
 
-		/* ---- 当日分时: 固定 0–24 时, 跟随「统计日期」; 折线与柱状共用同一份数据 ---- */
+		/* ---- 分时柱状: 固定 0–24 时, 跟随「统计日期」 ---- */
 		var dayTip = function (i, d) {
 			return (d && d.has) ? (i + ':00  ↓ ' + fmtBps(d.rx) + '  ↑ ' + fmtBps(d.tx)) : (i + ':00  无采样');
 		};
@@ -305,23 +315,7 @@ return view.extend({
 				hourly[u].rx = hourly[u].rx * 1024 * 8 / secs;
 				hourly[u].tx = hourly[u].tx * 1024 * 8 / secs;
 			}
-
-			var dayRes = paintSeries(dayChart, hourly, {
-				'vstep': 6,
-				'tip': dayTip,
-				'peak': function (k) {
-					return '峰值 ' + k + ':00  ↓ ' + fmtBps(hourly[k].rx) + ' / ↑ ' + fmtBps(hourly[k].tx);
-				}
-			});
-			axisBoundary(dayChart, 24, 3);
-			dayChart.title.textContent = '全屋分时速率 · ' + chartDate + '（每小时平均，0–24 时）';
-
-			/* 柱状图沿用折线算出的 yMax, 两图同标度才可比 */
-			paintBars(barChart, hourly, {
-				'vstep': 6,
-				'yMax': dayRes.yMax,
-				'tip': dayTip
-			});
+			paintBars(barChart, hourly, { 'vstep': 6, 'tip': dayTip });
 			axisBoundary(barChart, 24, 3);
 			barChart.title.textContent = '分时柱状 · ' + chartDate + '（每小时平均，0–24 时）';
 		};
@@ -333,7 +327,14 @@ return view.extend({
 			while (chart.svg.firstChild) chart.svg.removeChild(chart.svg.firstChild);
 			while (chart.axis.firstChild) chart.axis.removeChild(chart.axis.firstChild);
 
-			var yMax = (opt.yMax > 0) ? opt.yMax : 1024;
+			var max = 0;
+			for (var m0 = 0; m0 < n; m0++) {
+				var d0 = slots[m0];
+				if (!d0 || !d0.has) continue;
+				if (d0.rx > max) max = d0.rx;
+				if (d0.tx > max) max = d0.tx;
+			}
+			var yMax = (opt.yMax > 0) ? opt.yMax : niceMax(max);
 			var slot = W / n, bw = slot * 0.32, gap = slot * 0.08;
 
 			for (var g = 0; g <= 4; g++) {
@@ -450,7 +451,7 @@ return view.extend({
 			]),
 			staleNote,
 			header,
-			dayChart.box,
+			liveChart.box,
 			barChart.box,
 			controls,
 			mkTable('客户端实时速率', ['客户端', 'IP', '↓ 速率', '↑ 速率', '今日累计 ↓/↑'], liveBody, 2),
@@ -480,6 +481,18 @@ return view.extend({
 				liveDaySum.textContent = fmtBytes(d.total && d.total.day_rx) + ' / ' + fmtBytes(d.total && d.total.day_tx);
 				cpuUsage.textContent = (d.cpu && d.cpu.usage != null) ? d.cpu.usage.toFixed(1) + ' %' : '-';
 				cpuFreq.textContent = (d.cpu && d.cpu.mhz) ? (d.cpu.mhz + ' MHz') : '-';
+
+				/* 波形: 仅在新采样点时追加, 避免同一 tick 重复画 */
+				if (d.ts && d.ts > lastTs) {
+					lastTs = d.ts;
+					sparkData.push({
+						't': d.ts,
+						'rx': Number(d.total && d.total.rx) || 0,
+						'tx': Number(d.total && d.total.tx) || 0
+					});
+					if (sparkData.length > MAXPTS) sparkData.shift();
+					drawSpark();
+				}
 
 				var cl = (d.clients || []).slice();
 				cl.unshift({
@@ -609,6 +622,8 @@ return view.extend({
 
 		/* 先画出空网格, 数据到了再填, 避免首屏一片空白 */
 		paintDay([]);
+		drawSpark();
+		loadSeries();
 		loadDates().then(loadHistory);
 		poll.add(loadHistory, 60);
 		/* 跨天后日历的 max 要跟进到新的"今天"，每小时重扫一次 */

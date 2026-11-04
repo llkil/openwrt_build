@@ -1,6 +1,7 @@
 #!/bin/sh
 # flowmon-panel — LuCI RPC 入口
 #   live             当前实时速率 JSON
+#   series           最近 10 分钟波形（每 2 秒一个采样点）
 #   history [日期]   聚合 JSON（无参=全部保留期，YYYY-MM-DD=仅该日；含逐小时汇总）
 #   dates            可用日期列表 + 当前保留设置
 #   setretention N   修改保留天数并重启采集器（N ∈ 1/2/3/7/14/30/60/90）
@@ -22,6 +23,16 @@ live)
         cat "$RUN/live.json"
     else
         echo '{"error":"采集器未运行"}'
+    fi
+    ;;
+
+series)
+    if [ -s "$RUN/spark.txt" ]; then
+        awk 'BEGIN { printf "{\"points\":[" }
+        { printf "%s{\"t\":%s,\"rx\":%s,\"tx\":%s}", (NR > 1 ? "," : ""), $1, $2, $3 }
+        END { printf "]}\n" }' "$RUN/spark.txt"
+    else
+        echo '{"points":[]}'
     fi
     ;;
 
@@ -103,7 +114,7 @@ setretention)
     ;;
 
 *)
-    echo "usage: flowmon-panel live|history [date]|dates|setretention <days>"
+    echo "usage: flowmon-panel live|series|history [date]|dates|setretention <days>"
     exit 1
     ;;
 esac
