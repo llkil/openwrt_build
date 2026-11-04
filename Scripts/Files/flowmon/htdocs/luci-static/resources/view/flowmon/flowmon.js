@@ -21,13 +21,19 @@ function fmtBytes(b) {
 	return b.toFixed(i ? 2 : 0) + ' ' + u[i];
 }
 
-/* 把峰值抬到 1/2/2.5/5/10 x 10^n 的整刻度, 避免柱子贴顶 */
+/* 把峰值抬到 1/2/2.5/5/10 x 10^n 的整刻度, 避免曲线贴顶 */
 function niceMax(v) {
 	if (!(v > 0)) return 1024;
 	var e = Math.pow(10, Math.floor(Math.log(v) / Math.LN10));
 	var n = v / e;
 	var m = n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10;
 	return m * e;
+}
+
+function svgEl(tag, attrs) {
+	var el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+	for (var k in attrs) el.setAttribute(k, attrs[k]);
+	return el;
 }
 
 /* 浏览器本地日期 -> YYYY-MM-DD（不用 toISOString，避免 UTC 偏移把日期推到前一天） */
@@ -98,64 +104,144 @@ return view.extend({
 			summaryCard(cpuFreq, 'CPU 频率')
 		]);
 
-		/* ---- 全屋分时速率: 0–24 时, 每小时平均 bps ---- */
-		var hourly = [];               /* 24 × {rx,tx} bps */
+		/* ---- 全屋分时速率: 0–24 时折线, 每小时平均 bps ---- */
+		var hourly = [];               /* 24 × {rx,tx,has} */
 		var chartDate = '';
 		var hourTitle = E('h3', { 'style': 'margin:0' }, '全屋分时速率');
 		var hourPeak = E('span', { 'style': 'opacity:.7;font-size:.85em' }, '');
-		var hourPlot = E('div', {
-			'style': 'position:relative;height:150px;display:flex;align-items:flex-end;gap:2px;' +
-				'border-bottom:1px solid rgba(128,128,128,.35);' +
-				'background:linear-gradient(to top,rgba(128,128,128,.16) 0 1px,transparent 1px);' +
-				'background-size:100% 25%;background-repeat:repeat-y'
+		var hourSvg = svgEl('svg', {
+			'viewBox': '0 0 800 150',
+			'preserveAspectRatio': 'none',
+			'style': 'display:block;width:100%;height:150px'
 		});
-		var hourAxis = E('div', { 'style': 'position:relative;display:flex;gap:2px;margin-top:3px' });
+		var hourScale = E('span', {
+			'style': 'position:absolute;left:2px;top:0;font-size:.72em;opacity:.45;pointer-events:none'
+		}, '');
+		var chartWrap = E('div', {
+			'style': 'position:relative;border-bottom:1px solid rgba(128,128,128,.35)'
+		}, [hourSvg, hourScale]);
+		/* 刻度用绝对定位的 HTML, 不放进 SVG —— 否则会被 preserveAspectRatio:none 横向拉变形 */
+		var hourAxis = E('div', { 'style': 'position:relative;height:1.2em;margin-top:2px' });
 
 		var drawHourly = function () {
-			while (hourPlot.firstChild) hourPlot.removeChild(hourPlot.firstChild);
+			var W = 800, H = 150, PT = 8, PB = 4, HH = H - PT - PB, BASE = PT + HH;
+			while (hourSvg.firstChild) hourSvg.removeChild(hourSvg.firstChild);
 			while (hourAxis.firstChild) hourAxis.removeChild(hourAxis.firstChild);
 
-			var max = 0, pkSum = -1, pkH = 0;
+			var max = 0, pkSum = -1, pkH = 0, pts = 0;
 			for (var i = 0; i < 24; i++) {
-				var o = hourly[i] || { 'rx': 0, 'tx': 0 };
+				var o = hourly[i];
+				if (!o || !o.has) continue;
+				pts++;
 				if (o.rx > max) max = o.rx;
 				if (o.tx > max) max = o.tx;
 				if (o.rx + o.tx > pkSum) { pkSum = o.rx + o.tx; pkH = i; }
 			}
 			var yMax = niceMax(max);
 
-			var bars = [['rx', '#2f86d8'], ['tx', '#f08c2e']];
-			for (var h = 0; h < 24; h++) {
-				var v = hourly[h] || { 'rx': 0, 'tx': 0 };
-				var slot = E('div', {
-					'style': 'flex:1;height:100%;display:flex;align-items:flex-end;justify-content:center;gap:1px',
-					'title': h + ':00  ↓ ' + fmtBps(v.rx) + '  ↑ ' + fmtBps(v.tx)
-				});
-				for (var b = 0; b < 2; b++) {
-					var val = v[bars[b][0]];
-					slot.appendChild(E('div', {
-						'style': 'width:44%;height:' + (yMax > 0 ? Math.min(val / yMax, 1) * 100 : 0) + '%;' +
-							'min-height:' + (val > 0 ? '1px' : '0') + ';' +
-							'background:' + bars[b][1] + ';border-radius:1px 1px 0 0'
+			for (var g = 0; g <= 4; g++) {
+				var gy = PT + HH * g / 4;
+				hourSvg.appendChild(svgEl('line', {
+					'x1': 0, 'y1': gy, 'x2': W, 'y2': gy,
+					'stroke': 'currentColor',
+					'stroke-opacity': (g === 4 ? 0.28 : 0.1),
+					'stroke-width': 1,
+					'vector-effect': 'non-scaling-stroke'
+				}));
+			}
+			/* 每 6 小时一条竖线, 与刻度对齐 */
+			for (var vx = 0; vx <= 4; vx++) {
+				hourSvg.appendChild(svgEl('line', {
+					'x1': W * vx / 4, 'y1': PT, 'x2': W * vx / 4, 'y2': BASE,
+					'stroke': 'currentColor', 'stroke-opacity': 0.07,
+					'stroke-width': 1, 'vector-effect': 'non-scaling-stroke'
+				}));
+			}
+
+			/* 点取小时中点; 无采集的小时断开折线, 不用 0 值冒充"没流量" */
+			var xAt = function (h) { return (h + 0.5) / 24 * W; };
+			var yAt = function (v) { return PT + (1 - Math.min(v / yMax, 1)) * HH; };
+			var segs = [], cur = [];
+			for (var hh = 0; hh < 24; hh++) {
+				if (hourly[hh] && hourly[hh].has) cur.push(hh);
+				else if (cur.length) { segs.push(cur); cur = []; }
+			}
+			if (cur.length) segs.push(cur);
+
+			var series = [
+				['rx', '#2f86d8', 'rgba(47,134,216,.16)'],
+				['tx', '#f08c2e', 'rgba(240,140,46,.15)']
+			];
+
+			/* 先铺面积再压线, 避免两色互相遮挡 */
+			for (var a = 0; a < series.length; a++) {
+				var ka = series[a][0];
+				for (var sa = 0; sa < segs.length; sa++) {
+					var ga = segs[sa];
+					if (ga.length < 2) continue;
+					var dd = '';
+					for (var p = 0; p < ga.length; p++)
+						dd += (p ? 'L' : 'M') + xAt(ga[p]).toFixed(1) + ',' + yAt(hourly[ga[p]][ka]).toFixed(1);
+					hourSvg.appendChild(svgEl('path', {
+						'd': dd + 'L' + xAt(ga[ga.length - 1]).toFixed(1) + ',' + BASE +
+							'L' + xAt(ga[0]).toFixed(1) + ',' + BASE + 'Z',
+						'fill': series[a][2], 'stroke': 'none'
 					}));
 				}
-				hourPlot.appendChild(slot);
-
-				hourAxis.appendChild(E('div', {
-					'style': 'flex:1;text-align:center;font-size:.72em;opacity:.6;white-space:nowrap'
-				}, h % 3 === 0 ? String(h) : ''));
 			}
-			/* 右端补 24 时刻度, 坐标读作 0–24 */
-			hourAxis.appendChild(E('span', {
-				'style': 'position:absolute;right:-2px;bottom:0;font-size:.72em;opacity:.6'
-			}, '24'));
-
-			if (max <= 0) {
-				hourPeak.textContent = '当日暂无采样数据';
-			} else {
-				hourPeak.textContent = '峰值 ' + pkH + ':00  ↓ ' + fmtBps(hourly[pkH].rx) +
-					' / ↑ ' + fmtBps(hourly[pkH].tx);
+			for (var t = 0; t < series.length; t++) {
+				var kt = series[t][0];
+				for (var st = 0; st < segs.length; st++) {
+					var gt = segs[st];
+					if (!gt.length) continue;
+					/* 孤立单点画一小段短线, 否则那个小时什么都看不见 */
+					if (gt.length === 1) {
+						hourSvg.appendChild(svgEl('line', {
+							'x1': xAt(gt[0]) - 1.5, 'y1': yAt(hourly[gt[0]][kt]),
+							'x2': xAt(gt[0]) + 1.5, 'y2': yAt(hourly[gt[0]][kt]),
+							'stroke': series[t][1], 'stroke-width': 2.4, 'stroke-linecap': 'round',
+							'vector-effect': 'non-scaling-stroke'
+						}));
+						continue;
+					}
+					var pd = '';
+					for (var q = 0; q < gt.length; q++)
+						pd += (q ? 'L' : 'M') + xAt(gt[q]).toFixed(1) + ',' + yAt(hourly[gt[q]][kt]).toFixed(1);
+					hourSvg.appendChild(svgEl('path', {
+						'd': pd, 'fill': 'none', 'stroke': series[t][1],
+						'stroke-width': 1.8, 'stroke-linejoin': 'round', 'stroke-linecap': 'round',
+						'vector-effect': 'non-scaling-stroke'
+					}));
+				}
 			}
+
+			/* 悬停热区: 每小时一格, 用原生 title 提示 */
+			for (var hz = 0; hz < 24; hz++) {
+				var hd = hourly[hz];
+				var rect = svgEl('rect', {
+					'x': (hz / 24 * W).toFixed(1), 'y': PT,
+					'width': (W / 24).toFixed(1), 'height': HH, 'fill': 'transparent'
+				});
+				var ttl = svgEl('title', {});
+				ttl.textContent = (hd && hd.has)
+					? hz + ':00  ↓ ' + fmtBps(hd.rx) + '  ↑ ' + fmtBps(hd.tx)
+					: hz + ':00  无采样';
+				rect.appendChild(ttl);
+				hourSvg.appendChild(rect);
+			}
+
+			for (var ax = 0; ax <= 8; ax++) {
+				var hv = ax * 3, pct = hv / 24 * 100;
+				hourAxis.appendChild(E('span', {
+					'style': 'position:absolute;top:0;font-size:.72em;opacity:.6;white-space:nowrap;left:' +
+						pct + '%;transform:translateX(' + (hv === 0 ? '0' : hv === 24 ? '-100%' : '-50%') + ')'
+				}, String(hv)));
+			}
+
+			hourScale.textContent = max > 0 ? fmtBps(yMax) : '';
+			hourPeak.textContent = pts
+				? ('峰值 ' + pkH + ':00  ↓ ' + fmtBps(hourly[pkH].rx) + ' / ↑ ' + fmtBps(hourly[pkH].tx))
+				: '当日暂无采样数据';
 			hourTitle.textContent = '全屋分时速率' + (chartDate ? ' · ' + chartDate : '') + '（每小时平均，0–24 时）';
 		};
 
@@ -174,7 +260,7 @@ return view.extend({
 					hourPeak
 				])
 			]),
-			hourPlot,
+			chartWrap,
 			hourAxis
 		]);
 
@@ -287,15 +373,17 @@ return view.extend({
 				var buckets = {}, order = [];
 				var hours = d.hours || [];
 
-				/* 分时柱: 固定画 chartDate 这一天（全部模式取今天）, 缺的钟点补 0 */
+				/* 分时折线: 固定画 chartDate 这一天（全部模式取今天）;
+				   has 标记该小时是否真有采集, 没采集的点断开而不是画成 0 */
 				chartDate = historyDate || ymd(new Date());
 				hourly = [];
-				for (var z = 0; z < 24; z++) hourly.push({ 'rx': 0, 'tx': 0 });
+				for (var z = 0; z < 24; z++) hourly.push({ 'rx': 0, 'tx': 0, 'has': false });
 				for (var q = 0; q < hours.length; q++) {
 					var hq = hours[q].h || '';
 					if (hq.substring(0, 10) !== chartDate) continue;
 					var hr = parseInt(hq.substring(11, 13), 10);
 					if (!(hr >= 0 && hr < 24)) continue;
+					hourly[hr].has = true;
 					hourly[hr].rx += Number(hours[q].rx) || 0;
 					hourly[hr].tx += Number(hours[q].tx) || 0;
 				}
