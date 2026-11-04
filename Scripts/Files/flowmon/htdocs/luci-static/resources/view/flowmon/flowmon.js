@@ -38,6 +38,13 @@ function niceMax(v) {
 	return m * e;
 }
 
+/* 浏览器本地日期 -> YYYY-MM-DD（不用 toISOString，避免 UTC 偏移把日期推到前一天） */
+function ymd(d) {
+	return d.getFullYear() + '-' +
+		(d.getMonth() + 1 < 10 ? '0' : '') + (d.getMonth() + 1) + '-' +
+		(d.getDate() < 10 ? '0' : '') + d.getDate();
+}
+
 function cliName(ip) {
 	if (ip === '__ROUTER__') return '路由器本机';
 	return (nameMap[ip] != null && nameMap[ip] !== '') ? nameMap[ip] : ip;
@@ -212,10 +219,16 @@ return view.extend({
 			]);
 		};
 
-		/* 历史范围控件: 日期选择 + 保留天数; 选单日时按小时展示, 选全部时按天展示 */
-		var rangeSel = E('select', { 'class': 'cbi-input-select' }, [
-			E('option', { 'value': '' }, '全部（累计）')
+		/* 统计日期控件: 全部（按天聚合） / 指定某日（按小时聚合，日历选择） */
+		var modeSel = E('select', { 'class': 'cbi-input-select' }, [
+			E('option', { 'value': '' }, '全部'),
+			E('option', { 'value': 'day' }, '某日')
 		]);
+		var dateInp = E('input', {
+			'class': 'cbi-input-text',
+			'type': 'date',
+			'style': 'width:auto;min-width:11em;display:none'
+		});
 		var keepSel = E('select', { 'class': 'cbi-input-select' }, [2, 7, 14, 30].map(function (n) {
 			return E('option', { 'value': String(n) }, n + ' 天');
 		}));
@@ -225,7 +238,7 @@ return view.extend({
 		var controls = E('div', {
 			'style': 'display:flex;gap:.6em;align-items:center;flex-wrap:wrap;margin-bottom:1em'
 		}, [
-			E('label', {}, '历史范围'), rangeSel,
+			E('label', {}, '统计日期'), modeSel, dateInp,
 			E('label', { 'style': 'margin-left:1em' }, '保留天数'), keepSel,
 			usageNote
 		]);
@@ -339,23 +352,35 @@ return view.extend({
 			}).catch(function () { });
 		};
 
-		/* 可用日期列表 + 当前保留设置（日期降序，最新在前） */
+		/* 保留设置 + 日历可选范围（min = 保留期首日, max = 今天） */
 		var loadDates = function () {
 			return fs.exec('/usr/libexec/flowmon-panel', ['dates']).then(function (res) {
 				var d;
 				try { d = JSON.parse(res.stdout); } catch (e) { return; }
 				if (!d) return;
-				var days = (d.days || []).slice().sort().reverse();
-				while (rangeSel.firstChild) rangeSel.removeChild(rangeSel.firstChild);
-				rangeSel.appendChild(E('option', { 'value': '' }, '全部（累计 ' + days.length + ' 天）'));
-				for (var i = 0; i < days.length; i++) {
-					rangeSel.appendChild(E('option', { 'value': days[i] }, days[i]));
+				var days = (d.days || []).slice().sort();
+				var cur = Number(d.retention) || 2;
+				var today = ymd(new Date());
+				var startD = new Date();
+				startD.setDate(startD.getDate() - (cur - 1));
+				var start = ymd(startD);
+
+				/* 先放开边界再收紧: 直接把 min 改大会把旧值夹掉, 浏览器会清空输入框 */
+				dateInp.removeAttribute('min');
+				dateInp.removeAttribute('max');
+				dateInp.min = start;
+				dateInp.max = today;
+				/* 默认看最新有数据的一天（通常是今天）; 若旧值越界则回落到该日 */
+				var fallback = days.length ? days[days.length - 1] : today;
+				if (!dateInp.value || dateInp.value < start || dateInp.value > today) {
+					dateInp.value = fallback;
 				}
-				rangeSel.value = historyDate;
+				if (historyDate) historyDate = dateInp.value;
+
 				/* 保留天数可能被 SSH 改成 1/3/60/90 这类非预设值，重建时补进去，
 				   否则 <select> 会静默显示成第一个选项，误导用户 */
 				while (keepSel.firstChild) keepSel.removeChild(keepSel.firstChild);
-				var keepOpts = [2, 7, 14, 30], cur = Number(d.retention) || 2;
+				var keepOpts = [2, 7, 14, 30];
 				if (keepOpts.indexOf(cur) < 0) keepOpts.push(cur);
 				keepOpts.sort(function (a, b) { return a - b; });
 				for (var q = 0; q < keepOpts.length; q++) {
@@ -367,10 +392,18 @@ return view.extend({
 			}).catch(function () { });
 		};
 
-		rangeSel.addEventListener('change', function () {
-			historyDate = rangeSel.value || '';
+		var applyDate = function () {
+			historyDate = (modeSel.value === 'day' && dateInp.value) ? dateInp.value : '';
 			loadHistory();
+		};
+
+		modeSel.addEventListener('change', function () {
+			var isDay = modeSel.value === 'day';
+			dateInp.style.display = isDay ? '' : 'none';
+			applyDate();
 		});
+
+		dateInp.addEventListener('change', applyDate);
 
 		keepSel.addEventListener('change', function () {
 			var n = keepSel.value;
@@ -403,7 +436,7 @@ return view.extend({
 		loadSeries();
 		loadDates().then(loadHistory);
 		poll.add(loadHistory, 60);
-		/* 跨天后新日期要出现在下拉框里，每小时重扫一次文件列表 */
+		/* 跨天后日历的 max 要跟进到新的"今天"，每小时重扫一次 */
 		poll.add(loadDates, 3600);
 
 		return root;
