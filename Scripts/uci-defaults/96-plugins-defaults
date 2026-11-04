@@ -34,6 +34,13 @@ if [ -x /etc/init.d/cpufreq ] && grep -qw schedutil /sys/devices/system/cpu/cpuf
 	/etc/init.d/cpufreq enable >/dev/null 2>&1
 fi
 
+# Per-client traffic monitor: the package ships the service but nothing
+# enables it, so register autostart and start it on first boot.
+if [ -x /etc/init.d/flowmon ]; then
+	/etc/init.d/flowmon enable >/dev/null 2>&1
+	/etc/init.d/flowmon start >/dev/null 2>&1
+fi
+
 # LuCI: Chinese UI (theme and timezone come from 95-project-defaults).
 uci -q set luci.main.lang='zh-cn'
 uci -q commit luci

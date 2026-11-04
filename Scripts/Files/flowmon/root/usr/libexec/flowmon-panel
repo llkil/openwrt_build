@@ -1,0 +1,77 @@
+#!/bin/sh
+# flowmon-panel — LuCI RPC 入口
+#   live     当前实时速率 JSON
+#   history  最近 48h 聚合 JSON
+
+RUN=/tmp/flowmon
+DATA=/overlay/flowmon
+
+case "$1" in
+live)
+    if [ -f "$RUN/live.json" ]; then
+        cat "$RUN/live.json"
+    else
+        echo '{"error":"采集器未运行"}'
+    fi
+    ;;
+
+series)
+    if [ -s "$RUN/spark.txt" ]; then
+        awk 'BEGIN { printf "{\"points\":[" }
+        { printf "%s{\"t\":%s,\"rx\":%s,\"tx\":%s}", (NR > 1 ? "," : ""), $1, $2, $3 }
+        END { printf "]}\n" }' "$RUN/spark.txt"
+    else
+        echo '{"points":[]}'
+    fi
+    ;;
+
+history)
+    TMP=/tmp/flowmon/hist.tmp
+    mkdir -p "$RUN"
+    : > "$TMP"
+    for f in "$DATA"/*.csv; do
+        [ -f "$f" ] || continue
+        d=${f##*/}
+        d=${d%.csv}
+        awk -F, -v day="$d" '
+        NF >= 4 && $2 != "" {
+            printf "c_%s %d %d\n", $2, $3, $4
+            printf "h_%s %s %d %d\n", day, substr($1, 1, 2), $3, $4
+        }' "$f" >> "$TMP"
+    done
+    awk '
+    $1 ~ /^c_/ { CR[$1] += $2; CT[$1] += $3; if (!($1 in SEENC)) { SEENC[$1] = 1; NI++; ID[NI] = $1 }; next }
+    $1 ~ /^h_/ { HK = $1 " " $2; HR[HK, 1] += $3; HR[HK, 2] += $4; if (!(HK in SEEN)) { SEEN[HK] = 1; NH++; HO[NH] = HK }; next }
+    END {
+        printf "{\"clients\":["
+        for (i = 1; i <= NI; i++) {
+            best = -1
+            for (j = 1; j <= NI; j++) {
+                if (ID[j] == "") continue
+                v = CR[ID[j]] + CT[ID[j]]
+                if (v > best) { best = v; pick = j }
+            }
+            ip = ID[pick]; ID[pick] = ""
+            printf "%s{\"ip\":\"%s\",\"rx\":%.1f,\"tx\":%.1f}", (i > 1 ? "," : ""), substr(ip, 3), CR[ip], CT[ip]
+        }
+        printf "],\"hours\":["
+        for (i = 1; i <= NH; i++) {
+            for (j = 1; j <= NH; j++) {
+                if (HO[j] == "") continue
+                if (min == "" || HO[j] < min) { min = HO[j]; pick = j }
+            }
+            k = HO[pick]; HO[pick] = ""; min = ""
+            printf "%s{\"h\":\"%s %s\",\"rx\":%.1f,\"tx\":%.1f}", (i > 1 ? "," : ""), substr(k, 3, 10), substr(k, 14), HR[k, 1], HR[k, 2]
+        }
+        printf "]}"
+    }
+    ' "$TMP"
+    rm -f "$TMP"
+    echo
+    ;;
+
+*)
+    echo "usage: flowmon-panel live|series|history"
+    exit 1
+    ;;
+esac

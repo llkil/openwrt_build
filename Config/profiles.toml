@@ -204,6 +204,8 @@ required = [
   # CPU 频率：设置界面 + 状态页实时频率卡片（后者为自建包）
   "PACKAGE_luci-app-cpufreq",
   "PACKAGE_luci-app-cpufreqview",
+  # 实时流量：按客户端统计 + 趋势图（自建包）
+  "PACKAGE_luci-app-flowmon",
 ]
 
 # 固件必需包
@@ -269,6 +271,7 @@ required_image_packages = [
   "luci-i18n-smartdns-zh-cn",
   "luci-app-cpufreq",
   "luci-app-cpufreqview",
+  "luci-app-flowmon",
 ]
 
 # 固件禁用包

@@ -489,6 +489,15 @@ def integrate(lock, tree):
     if target.exists():
         shutil.rmtree(target)
     shutil.copytree(ROOT / "Scripts/Files/cpufreqview", target)
+    # 自建小插件：按客户端实时流量统计（nft 钩子层计数 + LuCI 趋势图，无二进制）
+    target = tree / "package/luci-app-flowmon"
+    if target.exists():
+        shutil.rmtree(target)
+    shutil.copytree(ROOT / "Scripts/Files/flowmon", target)
+    # 仓库里已是 100755，这里再兜一次底，避免宿主 umask 吃掉执行位
+    for relative in ("root/usr/bin/flowmon-loop", "root/usr/libexec/flowmon-panel",
+                     "root/etc/init.d/flowmon"):
+        (target / relative).chmod(0o755)
     # Maintain the old Rust build fix without unrelated theme/download hacks.
     for path in (tree / "feeds/packages").glob("*/rust/Makefile"):
         path.write_text(path.read_text().replace("ci-llvm=true", "ci-llvm=false"))

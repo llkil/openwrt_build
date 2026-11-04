@@ -1,0 +1,13 @@
+{
+	"admin/status/flowmon": {
+		"title": "实时流量",
+		"order": 65,
+		"action": {
+			"type": "view",
+			"path": "flowmon/flowmon"
+		},
+		"depends": {
+			"acl": [ "luci-app-flowmon" ]
+		}
+	}
+}

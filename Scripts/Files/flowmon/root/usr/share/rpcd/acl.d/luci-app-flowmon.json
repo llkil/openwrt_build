@@ -1,0 +1,14 @@
+{
+	"luci-app-flowmon": {
+		"description": "Grant access to flowmon realtime traffic panel",
+		"read": {
+			"ubus": {
+				"file": [ "exec" ]
+			},
+			"file": {
+				"/usr/libexec/flowmon-panel": [ "exec" ]
+			}
+		},
+		"write": {}
+	}
+}

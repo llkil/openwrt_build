@@ -1,0 +1,241 @@
+#!/bin/sh
+# flowmon-loop — 基于 nft 钩子层计数器的按客户端流量采集
+# 说明: conntrack 字节计数在本机 (PassWall2 TPROXY + EasyTier 多层 netfilter) 存在
+#       幻影跳变 (实测 conntrack +9.9MB vs 钩子层 50KB), 故改用 nft per-element counter。
+# 实时: /tmp/flowmon/live.json  历史: /overlay/flowmon/YYYY-MM-DD.csv (保留 2 天)
+
+INTERVAL=2
+FLUSH=60
+KEEP_DAYS=2
+RUN=/tmp/flowmon
+DATA=/overlay/flowmon
+
+LANIP=$(uci -q get network.lan.ipaddr 2>/dev/null || echo "192.168.50.1")
+PFX="${LANIP%.*}."
+PFX24="${LANIP%.*}.0/24"
+
+# WAN 接口用于全屋总量计数。init 已排在 network 之后, 这里再留 60s 兜底等待,
+# 避免开机早期默认路由尚未建立时把接口名猜错。
+WANIF=$(ip -4 route 2>/dev/null | awk '/^default/{print $5; exit}')
+if [ -z "$WANIF" ]; then
+    for _w in 1 2 3 4 5 6 7 8 9 10 11 12; do
+        sleep 5
+        WANIF=$(ip -4 route 2>/dev/null | awk '/^default/{print $5; exit}')
+        [ -n "$WANIF" ] && break
+    done
+fi
+[ -n "$WANIF" ] || WANIF=$(uci -q get network.wan.device 2>/dev/null)
+[ -n "$WANIF" ] || WANIF="pppoe-wan"
+
+mkdir -p "$RUN"
+# 历史落持久分区; 不可写时退化到内存, 只丢历史, 实时统计不受影响。
+mkdir -p "$DATA" 2>/dev/null
+[ -d "$DATA" ] && [ -w "$DATA" ] || DATA="$RUN/data"
+mkdir -p "$DATA"
+
+# ---- nft 计数表 (独立于 fw4, 不受防火墙重载影响) ----
+NFTCONF="$RUN/nft.conf"
+cat > "$NFTCONF" <<EOF
+table inet flowmon {
+	set up {
+		type ipv4_addr
+		size 65536
+		flags dynamic
+		timeout 48h
+	}
+	set down {
+		type ipv4_addr
+		size 65536
+		flags dynamic
+		timeout 48h
+	}
+	chain cnt_up {
+		type filter hook forward priority -5; policy accept;
+		ip saddr $PFX24 update @up { ip saddr counter }
+	}
+	chain cnt_down {
+		type filter hook forward priority -5; policy accept;
+		ip daddr $PFX24 update @down { ip daddr counter }
+	}
+	chain prox_in {
+		type filter hook input priority -5; policy accept;
+		ip saddr $PFX24 ip daddr != $PFX24 update @up { ip saddr counter }
+	}
+	chain prox_out {
+		type filter hook output priority -5; policy accept;
+		ip daddr $PFX24 ip saddr != $PFX24 update @down { ip daddr counter }
+	}
+	chain wan_tx {
+		type filter hook output priority -5; policy accept;
+		oifname "$WANIF" counter
+	}
+	chain wan_rx {
+		type filter hook input priority -5; policy accept;
+		iifname "$WANIF" counter
+	}
+}
+EOF
+nft list table inet flowmon >/dev/null 2>&1 || nft -f "$NFTCONF" 2>/dev/null
+
+find "$DATA" -name '*.csv' -mtime +"$KEEP_DAYS" -delete 2>/dev/null
+LASTCLEAN=$(date +%s)
+
+# prev 快照跨重启保留: nft 计数器单调累加, 不清零才能算对重启期间的增量
+PREV="$RUN/prev.txt"
+[ -f "$PREV" ] || : > "$PREV"
+WTXP="$RUN/wtx.txt"
+WRXP="$RUN/wrx.txt"
+[ -f "$WTXP" ] || echo 0 > "$WTXP"
+[ -f "$WRXP" ] || echo 0 > "$WRXP"
+TODAY=$(date +%Y-%m-%d)
+DAY="$RUN/day_$TODAY.txt"
+[ -f "$DAY" ] || : > "$DAY"
+LASTFLUSH=0
+PREV_TS=$(date +%s)
+
+while :; do
+    T0=$(date +%s)
+    IV=$((T0 - PREV_TS))
+    PREV_TS=$T0
+    [ "$IV" -lt 1 ] && IV=1
+    [ "$IV" -gt 30 ] && IV=30
+    NOW=$T0
+    D=$(date +%Y-%m-%d)
+    if [ "$D" != "$TODAY" ]; then
+        TODAY=$D
+        DAY="$RUN/day_$D.txt"
+        : > "$DAY"
+        LASTFLUSH=0
+    fi
+    HM=$(date +%H:%M)
+
+    # 1) nft 计数器快照
+    nft list table inet flowmon >/dev/null 2>&1 || nft -f "$NFTCONF" 2>/dev/null
+    nft list set inet flowmon up | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3} counter packets [0-9]+ bytes [0-9]+' | awk '{print $1, $6}' > "$RUN/up.txt"
+    nft list set inet flowmon down | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3} counter packets [0-9]+ bytes [0-9]+' | awk '{print $1, $6}' > "$RUN/down.txt"
+    WTX=$(nft list chain inet flowmon wan_tx | grep -oE 'bytes [0-9]+' | head -n1 | awk '{print $2}')
+    WRX=$(nft list chain inet flowmon wan_rx | grep -oE 'bytes [0-9]+' | head -n1 | awk '{print $2}')
+    [ -n "$WTX" ] || WTX=$(cat "$WTXP")
+    [ -n "$WRX" ] || WRX=$(cat "$WRXP")
+
+    # 2) 与上次快照求增量 (计数器单调; 表被重建则计数回退, 按新计数全量计)
+    OWTX=$(cat "$WTXP")
+    OWRX=$(cat "$WRXP")
+    RTX=$((WTX - OWTX))
+    RRX=$((WRX - OWRX))
+    [ "$RTX" -lt 0 ] && RTX=$WTX
+    [ "$RRX" -lt 0 ] && RRX=$WRX
+    echo "$WTX" > "$WTXP"
+    echo "$WRX" > "$WRXP"
+
+    # 3) 合并 up/down 并逐 IP 求增量 → delta.txt (ip tx rx; __ROUTER__ tx rx; __TOTAL__ rx tx)
+    awk 'NR == FNR { U[$1] = $2; next } { print $1, U[$1] + 0, $2 }' "$RUN/up.txt" "$RUN/down.txt" > "$RUN/cur.txt"
+    if [ -s "$PREV" ]; then
+        awk -v RTX="$RTX" -v RRX="$RRX" '
+        NR == FNR { PU[$1] = $2; PD[$1] = $3; next }
+        {
+            pu = PU[$1] + 0; pd = PD[$1] + 0
+            du = ($2 >= pu) ? $2 - pu : $2
+            dd = ($3 >= pd) ? $3 - pd : $3
+            if (du > 0 || dd > 0) printf "%s %d %d\n", $1, du, dd
+            TTX += du; TRX += dd
+        }
+        END {
+            printf "__ROUTER__ %d %d\n", RTX, RRX
+            printf "__TOTAL__ %d %d\n", TRX + RRX, TTX + RTX
+        }
+        ' "$PREV" "$RUN/cur.txt" > "$RUN/delta.txt"
+    else
+        printf '__ROUTER__ %d %d\n__TOTAL__ %d %d\n' "$RTX" "$RRX" "$RRX" "$RTX" > "$RUN/delta.txt"
+    fi
+    mv "$RUN/cur.txt" "$PREV"
+
+    # 4) 增量并入当日累计 (R1/T1 双数组, 避免 SUBSEP 二维键在 for-in 中拆行)
+    awk '
+    FILENAME == ARGV[1] { R1[$1] += $2; T1[$1] += $3; next }
+    FILENAME == ARGV[2] {
+        if ($1 == "__TOTAL__") { R1["__TOTAL__"] += $2; T1["__TOTAL__"] += $3 }
+        else { R1[$1] += $3; T1[$1] += $2 }
+        next
+    }
+    END {
+        outf = ARGV[1] ".new"
+        for (k in R1) print k, R1[k] + 0, T1[k] + 0 > outf
+    }
+    ' "$DAY" "$RUN/delta.txt" 2>/dev/null
+    [ -f "$DAY.new" ] && mv "$DAY.new" "$DAY"
+
+    # 5) CPU 使用率 (/proc/stat 差值) 与实时频率
+    CPUP="$RUN/stat_prev.txt"
+    STATC=$(awk '/^cpu /{ print $2+$3+$4+$5+$6+$7+$8, $5+$6; exit }' /proc/stat 2>/dev/null)
+    if [ -n "$STATC" ]; then
+        CPUU=""
+        if [ -s "$CPUP" ]; then
+            read T1 I1 < "$CPUP"
+            T2=${STATC%% *}; I2=${STATC##* }
+            CPUU=$(awk -v a="$T1" -v b="$I1" -v c="$T2" -v d="$I2" 'BEGIN{ dt=c-a; di=d-b; u=(dt>0)?(1.0-di/dt)*100.0:0; if(u<0)u=0; if(u>100)u=100; printf "%.1f", u }')
+        fi
+        printf '%s\n' "$STATC" > "$CPUP"
+    else
+        CPUU=""
+    fi
+    FREQ=$(awk '{ s += $1; n++ } END{ if (n) printf "%d", s / n / 1000 }' /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq 2>/dev/null)
+
+    # 6) 生成 live.json — 客户端全集 = 实时活跃 ∪ 当日累计 ∪ DHCP 租约 (无流量补零)
+    awk -v ts="$NOW" -v iv="$IV" -v pfx="$PFX" -v lanip="$LANIP" -v cpuu="$CPUU" -v freq="$FREQ" -v spark="$RUN/spark.txt" '
+    function jesc(s) { gsub(/["\\]/, "\\\\&", s); return s }
+    FILENAME == ARGV[1] { if ($3 != "" && $4 != "") NM[$3] = $4; if ($3 != "") LI[++NL] = $3; next }
+    FILENAME == ARGV[2] { if ($1 == "__TOTAL__") { DR = $2; DT = $3 } else { DAYRX[$1] = $2; DAYTX[$1] = $3 }; next }
+    FILENAME == ARGV[3] {
+        if ($1 == "__TOTAL__") { RX = $2 / iv; TX = $3 / iv; next }
+        CTX[$1] = $2 / iv; CRX[$1] = $3 / iv
+        next
+    }
+    END {
+        NC = 0
+        for (ip in CTX) if (ip != "__ROUTER__" && !(ip in SEEN)) { SEEN[ip] = 1; CU[++NC] = ip }
+        for (ip in DAYRX) if (ip != "__ROUTER__" && !(ip in SEEN)) { SEEN[ip] = 1; CU[++NC] = ip }
+        for (i = 1; i <= NL; i++) if (!(LI[i] in SEEN)) { SEEN[LI[i]] = 1; CU[++NC] = LI[i] }
+        printf "{\"ts\":%d,\"interval\":%d,\"lan_ip\":\"%s\",\"cpu\":{\"usage\":%s,\"mhz\":%s},\"total\":{\"rx\":%.0f,\"tx\":%.0f,\"day_rx\":%.0f,\"day_tx\":%.0f},", ts, iv, lanip, (cpuu == "" ? "null" : cpuu), (freq == "" ? "null" : freq), RX, TX, DR + 0, DT + 0
+        printf "\"router\":{\"rx\":%.0f,\"tx\":%.0f,\"day_rx\":%.0f,\"day_tx\":%.0f},\"clients\":[", CRX["__ROUTER__"] + 0, CTX["__ROUTER__"] + 0, DAYRX["__ROUTER__"] + 0, DAYTX["__ROUTER__"] + 0
+        for (i = 1; i <= NC; i++) {
+            bv = -1; bd = ""
+            for (j = 1; j <= NC; j++) {
+                if (CU[j] == "") continue
+                v = DAYRX[CU[j]] + DAYTX[CU[j]]
+                if (v > bv || (v == bv && (bd == "" || CU[j] < bd))) { bv = v; bd = CU[j]; pick = j }
+            }
+            ip = CU[pick]; CU[pick] = ""
+            nm = NM[ip]; if (nm == "" || nm == "*") nm = ip
+            printf "%s{\"ip\":\"%s\",\"name\":\"%s\",\"rx\":%.0f,\"tx\":%.0f,\"day_rx\":%.0f,\"day_tx\":%.0f}", (i > 1 ? "," : ""), ip, jesc(nm), CRX[ip] + 0, CTX[ip] + 0, DAYRX[ip] + 0, DAYTX[ip] + 0
+        }
+        print "]}"
+        printf "%d %.0f %.0f\n", ts, RX, TX >> spark
+    }
+    ' /tmp/dhcp.leases "$DAY" "$RUN/delta.txt" > "$RUN/live.json.new" 2>/dev/null
+    [ -f "$RUN/live.json.new" ] && mv "$RUN/live.json.new" "$RUN/live.json"
+
+    # 6b) 波形环形缓冲: 保留最近 300 个采样点 (约 10 分钟), 供趋势图使用
+    if [ -f "$RUN/spark.txt" ]; then
+        SPL=$(wc -l < "$RUN/spark.txt" 2>/dev/null)
+        if [ "${SPL:-0}" -gt 320 ]; then
+            tail -n 300 "$RUN/spark.txt" > "$RUN/spark.tmp" 2>/dev/null && mv "$RUN/spark.tmp" "$RUN/spark.txt"
+        fi
+    fi
+
+    # 7) 定期落盘历史 (KiB)
+    if [ $((NOW - LASTFLUSH)) -ge $FLUSH ]; then
+        LASTFLUSH=$NOW
+        awk -F' ' -v hm="$HM" '
+        $1 != "__TOTAL__" && ($2 > 0 || $3 > 0) { printf "%s,%s,%.1f,%.1f\n", hm, $1, $3 / 1024, $2 / 1024 }
+        ' "$RUN/delta.txt" >> "$DATA/$TODAY.csv"
+    fi
+
+    # 8) 每 6 小时清理过期数据
+    if [ $((NOW - LASTCLEAN)) -ge 21600 ]; then
+        LASTCLEAN=$NOW
+        find "$DATA" -name '*.csv' -mtime +"$KEEP_DAYS" -delete 2>/dev/null
+    fi
+
+    sleep "$INTERVAL"
+done
