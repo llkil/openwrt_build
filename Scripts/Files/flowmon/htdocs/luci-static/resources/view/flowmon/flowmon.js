@@ -104,13 +104,9 @@ return view.extend({
 			summaryCard(cpuFreq, 'CPU 频率')
 		]);
 
-		/* ================= 趋势图: 当日分时(0–24) + 实时滚窗(近 24 小时) ================= */
-		var hourly = [];        /* 24 × {rx,tx,has} 当日某天 */
-		var roll = [];          /* ROLL_N × {rx,tx,has,label} 滚动窗口 */
+		/* ================= 趋势图: 当日分时 0–24 时（折线 + 柱状） ================= */
+		var hourly = [];        /* 24 × {rx,tx,rxkb,txkb,has} 当日某天 */
 		var chartDate = '';
-		var ROLL_N = 24;
-
-		var pad2 = function (n) { return (n < 10 ? '0' : '') + n; };
 
 		var legendEl = function (label, color) {
 			return E('span', { 'style': 'font-size:.85em' }, [
@@ -151,8 +147,8 @@ return view.extend({
 			return c;
 		};
 
-		var dayChart = mkChart('全屋分时速率');
-		var rollChart = mkChart('实时滚窗');
+		var dayChart = mkChart('全屋分时速率（折线）');
+		var barChart = mkChart('分时柱状');
 
 		var SERIES = [
 			['rx', '#2f86d8', 'rgba(47,134,216,.16)'],
@@ -182,7 +178,8 @@ return view.extend({
 				if (s0.tx > max) max = s0.tx;
 				if (s0.rx + s0.tx > pkSum) { pkSum = s0.rx + s0.tx; pkH = i; }
 			}
-			var yMax = niceMax(max);
+			/* 允许外部指定刻度: 折线与柱状并排时必须同标度, 否则两张图无法横向对比 */
+			var yMax = (opt && opt.yMax > 0) ? opt.yMax : niceMax(max);
 			var xAt = function (k) { return (k + 0.5) / n * W; };
 			var yAt = function (v) { return PT + (1 - Math.min(v / yMax, 1)) * HH; };
 
@@ -281,24 +278,16 @@ return view.extend({
 			}
 		};
 
-		/* 刻度落在格中心(时刻标签); 最后一格是当前小时, 不管步长都要标出来 */
-		var axisCenter = function (chart, labels, step) {
-			var n = labels.length;
-			for (var k = 0; k < n; k++) {
-				if (k % step && k !== n - 1) continue;
-				chart.axis.appendChild(E('span', {
-					'style': 'position:absolute;top:0;font-size:.72em;opacity:.6;white-space:nowrap;left:' +
-						((k + 0.5) / n * 100) + '%;transform:translateX(-50%)'
-				}, labels[k]));
-			}
+		/* ---- 当日分时: 固定 0–24 时, 跟随「统计日期」; 折线与柱状共用同一份数据 ---- */
+		var dayTip = function (i, d) {
+			return (d && d.has) ? (i + ':00  ↓ ' + fmtBps(d.rx) + '  ↑ ' + fmtBps(d.tx)) : (i + ':00  无采样');
 		};
 
-		/* ---- 当日分时: 固定 0–24 时, 跟随「统计日期」 ---- */
 		var paintDay = function (hoursArr) {
 			var now = new Date();
 			chartDate = historyDate || ymd(now);
 			hourly = [];
-			for (var z = 0; z < 24; z++) hourly.push({ 'rx': 0, 'tx': 0, 'has': false });
+			for (var z = 0; z < 24; z++) hourly.push({ 'rx': 0, 'tx': 0, 'rxkb': 0, 'txkb': 0, 'has': false });
 			for (var q = 0; q < hoursArr.length; q++) {
 				var hq = hoursArr[q].h || '';
 				if (hq.substring(0, 10) !== chartDate) continue;
@@ -310,62 +299,102 @@ return view.extend({
 			}
 			for (var u = 0; u < 24; u++) {
 				var secs = curHourSecs(chartDate, u, now);
+				/* 留一份原始 KiB, 柱状图标题行要显示当天合计流量 */
+				hourly[u].rxkb = hourly[u].rx;
+				hourly[u].txkb = hourly[u].tx;
 				hourly[u].rx = hourly[u].rx * 1024 * 8 / secs;
 				hourly[u].tx = hourly[u].tx * 1024 * 8 / secs;
 			}
-			paintSeries(dayChart, hourly, {
+
+			var dayRes = paintSeries(dayChart, hourly, {
 				'vstep': 6,
-				'tip': function (i, d) {
-					return (d && d.has) ? (i + ':00  ↓ ' + fmtBps(d.rx) + '  ↑ ' + fmtBps(d.tx)) : (i + ':00  无采样');
-				},
+				'tip': dayTip,
 				'peak': function (k) {
 					return '峰值 ' + k + ':00  ↓ ' + fmtBps(hourly[k].rx) + ' / ↑ ' + fmtBps(hourly[k].tx);
 				}
 			});
 			axisBoundary(dayChart, 24, 3);
 			dayChart.title.textContent = '全屋分时速率 · ' + chartDate + '（每小时平均，0–24 时）';
+
+			/* 柱状图沿用折线算出的 yMax, 两图同标度才可比 */
+			paintBars(barChart, hourly, {
+				'vstep': 6,
+				'yMax': dayRes.yMax,
+				'tip': dayTip
+			});
+			axisBoundary(barChart, 24, 3);
+			barChart.title.textContent = '分时柱状 · ' + chartDate + '（每小时平均，0–24 时）';
 		};
 
-		/* ---- 实时滚窗: 右端是当前小时(还在长), 整点一过冻结并左移一格 ---- */
-		var paintRoll = function (hoursArr) {
-			var now = new Date();
-			var keys = [], labels = [];
-			for (var i = ROLL_N - 1; i >= 0; i--) {
-				var d = new Date(now.getTime());
-				d.setHours(d.getHours() - i, 0, 0, 0);
-				keys.push(ymd(d) + ' ' + pad2(d.getHours()));
-				labels.push(pad2(d.getHours()) + ':00');
+		/* ---- 柱状: 与折线同一份数据、同一 y 刻度, 只换呈现方式 ---- */
+		var paintBars = function (chart, slots, opt) {
+			var W = 800, H = 150, PT = 8, PB = 4, HH = H - PT - PB, BASE = PT + HH;
+			var n = slots.length;
+			while (chart.svg.firstChild) chart.svg.removeChild(chart.svg.firstChild);
+			while (chart.axis.firstChild) chart.axis.removeChild(chart.axis.firstChild);
+
+			var yMax = (opt.yMax > 0) ? opt.yMax : 1024;
+			var slot = W / n, bw = slot * 0.32, gap = slot * 0.08;
+
+			for (var g = 0; g <= 4; g++) {
+				var gy = PT + HH * g / 4;
+				chart.svg.appendChild(svgEl('line', {
+					'x1': 0, 'y1': gy, 'x2': W, 'y2': gy,
+					'stroke': 'currentColor',
+					'stroke-opacity': (g === 4 ? 0.28 : 0.1),
+					'stroke-width': 1,
+					'vector-effect': 'non-scaling-stroke'
+				}));
 			}
-			var idx = {}, k;
-			for (k = 0; k < ROLL_N; k++) idx[keys[k]] = k;
-			roll = [];
-			for (k = 0; k < ROLL_N; k++) roll.push({ 'rx': 0, 'tx': 0, 'has': false, 'label': labels[k] });
-			/* hours[].h 形如 "YYYY-MM-DD HH"，截前 13 位正好是键 */
-			for (var q = 0; q < hoursArr.length; q++) {
-				var pos = idx[(hoursArr[q].h || '').substring(0, 13)];
-				if (pos === undefined) continue;
-				roll[pos].has = true;
-				roll[pos].rx += Number(hoursArr[q].rx) || 0;
-				roll[pos].tx += Number(hoursArr[q].tx) || 0;
+			for (var vx = 0; vx <= n; vx += opt.vstep) {
+				chart.svg.appendChild(svgEl('line', {
+					'x1': vx / n * W, 'y1': PT, 'x2': vx / n * W, 'y2': BASE,
+					'stroke': 'currentColor', 'stroke-opacity': 0.07,
+					'stroke-width': 1, 'vector-effect': 'non-scaling-stroke'
+				}));
 			}
-			for (var u = 0; u < ROLL_N; u++) {
-				var secs = curHourSecs(keys[u].substring(0, 10), parseInt(keys[u].substring(11, 13), 10), now);
-				roll[u].rx = roll[u].rx * 1024 * 8 / secs;
-				roll[u].tx = roll[u].tx * 1024 * 8 / secs;
-			}
-			paintSeries(rollChart, roll, {
-				'vstep': 6,
-				'tip': function (i, d) {
-					var lab = (d && d.label) || '';
-					return (d && d.has) ? (lab + '  ↓ ' + fmtBps(d.rx) + '  ↑ ' + fmtBps(d.tx)) : (lab + '  无采样');
-				},
-				'peak': function (k) {
-					return '峰值 ' + roll[k].label + '  ↓ ' + fmtBps(roll[k].rx) + ' / ↑ ' + fmtBps(roll[k].tx);
+
+			var pts = 0, sumRx = 0, sumTx = 0;
+			for (var i = 0; i < n; i++) {
+				var d = slots[i];
+				if (!d || !d.has) continue;
+				pts++;
+				sumRx += Number(d.rxkb) || 0;
+				sumTx += Number(d.txkb) || 0;
+				var xc = (i + 0.5) * slot;
+				for (var s = 0; s < SERIES.length; s++) {
+					var v = d[SERIES[s][0]];
+					var hgt = Math.min(v / yMax, 1) * HH;
+					/* 有流量但不足 1px 时给个保底, 否则那一小时看着像没数据 */
+					if (v > 0 && hgt < 1) hgt = 1;
+					if (!(hgt > 0)) continue;
+					var x0 = xc - bw - gap / 2 + s * (bw + gap);
+					chart.svg.appendChild(svgEl('rect', {
+						'x': x0.toFixed(1), 'y': (BASE - hgt).toFixed(1),
+						'width': bw.toFixed(1), 'height': hgt.toFixed(1),
+						'fill': SERIES[s][1], 'fill-opacity': 0.85, 'rx': 0.6
+					}));
 				}
-			});
-			axisCenter(rollChart, labels, 3);
-			rollChart.title.textContent = '实时滚窗（近 24 小时，每小时一格；当前小时按已过时间折算）';
+			}
+
+			/* 悬停热区: 每格一个透明矩形 + 原生 title */
+			for (var hz = 0; hz < n; hz++) {
+				var rect = svgEl('rect', {
+					'x': (hz / n * W).toFixed(1), 'y': PT,
+					'width': (W / n).toFixed(1), 'height': HH, 'fill': 'transparent'
+				});
+				var ttl = svgEl('title', {});
+				ttl.textContent = opt.tip(hz, slots[hz]);
+				rect.appendChild(ttl);
+				chart.svg.appendChild(rect);
+			}
+
+			chart.scale.textContent = pts ? fmtBps(yMax) : '';
+			chart.peak.textContent = pts
+				? ('合计 ↓ ' + fmtBytes(sumRx * 1024) + ' / ↑ ' + fmtBytes(sumTx * 1024))
+				: '暂无采样数据';
 		};
+
 		/* 表头与表体必须在同一个 <table> 内, 否则列宽各算各的, 上下永远对不齐 */
 		var mkTable = function (title, heads, body, rightFrom, titleEl) {
 			return E('div', { 'class': 'cbi-map' }, [
@@ -422,7 +451,7 @@ return view.extend({
 			staleNote,
 			header,
 			dayChart.box,
-			rollChart.box,
+			barChart.box,
 			controls,
 			mkTable('客户端实时速率', ['客户端', 'IP', '↓ 速率', '↑ 速率', '今日累计 ↓/↑'], liveBody, 2),
 			mkTable('客户端累计', ['客户端', 'IP', '↓ 累计', '↑ 累计', '合计'], histBody, 2, histTitle),
@@ -476,10 +505,8 @@ return view.extend({
 				var buckets = {}, order = [];
 				var hours = d.hours || [];
 
-				/* 两张图: 当日分时直接吃本次响应; 滚窗要看跨零点的 24 小时,
-				   「某日」模式下本次响应被裁剪过, 得另取一次全量 */
+				/* 折线与柱状吃同一份当日小时数据, 一次绘制同时更新两张图 */
 				paintDay(hours);
-				if (historyDate) loadRoll(); else paintRoll(hours);
 
 				for (var i = 0; i < hours.length; i++) {
 					var h = hours[i].h || '';
@@ -552,16 +579,6 @@ return view.extend({
 			}).catch(function () { });
 		};
 
-		/* 滚窗独立取一次全量（含跨零点的小时），只在「某日」模式下才会多这一次调用 */
-		var loadRoll = function () {
-			return fs.exec('/usr/libexec/flowmon-panel', ['history']).then(function (res) {
-				var d;
-				try { d = JSON.parse(res.stdout); } catch (e) { return; }
-				if (!d) return;
-				paintRoll(d.hours || []);
-			}).catch(function () { });
-		};
-
 		var applyDate = function () {
 			historyDate = (modeSel.value === 'day' && dateInp.value) ? dateInp.value : '';
 			loadHistory();
@@ -592,7 +609,6 @@ return view.extend({
 
 		/* 先画出空网格, 数据到了再填, 避免首屏一片空白 */
 		paintDay([]);
-		paintRoll([]);
 		loadDates().then(loadHistory);
 		poll.add(loadHistory, 60);
 		/* 跨天后日历的 max 要跟进到新的"今天"，每小时重扫一次 */
