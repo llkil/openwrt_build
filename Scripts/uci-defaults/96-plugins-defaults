@@ -25,6 +25,15 @@ fi
 # fstab / automount, used by the disk manager page.
 [ -x /etc/init.d/fstab ] && /etc/init.d/fstab enable >/dev/null 2>&1
 
+# CPU frequency scaling: the MTK defconfig pins governor=performance (max clock),
+# so any live-frequency display reads a constant 1800MHz. schedutil scales
+# 800-1800MHz with load and still reaches max under saturation.
+if [ -x /etc/init.d/cpufreq ] && grep -qw schedutil /sys/devices/system/cpu/cpufreq/policy0/scaling_available_governors 2>/dev/null; then
+	uci -q set cpufreq.cpufreq.governor0='schedutil'
+	uci -q commit cpufreq
+	/etc/init.d/cpufreq enable >/dev/null 2>&1
+fi
+
 # LuCI: Chinese UI (theme and timezone come from 95-project-defaults).
 uci -q set luci.main.lang='zh-cn'
 uci -q commit luci
