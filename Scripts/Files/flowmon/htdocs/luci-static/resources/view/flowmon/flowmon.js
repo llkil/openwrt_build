@@ -59,6 +59,21 @@ function summaryCard(el, label) {
 	]);
 }
 
+var dayCum = {};        /* 「某日」模式: ip -> {rx,tx} 该日累计(字节) */
+var dayCumOn = false;
+
+/* 实时表第 5 列: 全部模式看今天的累计, 某日模式看所选那天的累计。
+   live 接口里的 day_rx 永远是"采集器当天"的数, 不随日历走, 所以不能直接用 */
+function cumCell(c) {
+	if (dayCumOn) {
+		var v = dayCum[c.ip];
+		/* 该日压根没有这个 IP 的记录, 与"有记录但为 0"是两件事, 用破折号区分 */
+		return v ? (fmtBytes(v.rx) + ' / ' + fmtBytes(v.tx))
+		         : E('span', { 'style': 'opacity:.45' }, '—');
+	}
+	return fmtBytes(c.day_rx) + ' / ' + fmtBytes(c.day_tx);
+}
+
 function buildClientTable(bodyEl, clients, keyPrefix) {
 	var rows = [];
 	for (var i = 0; i < clients.length; i++) {
@@ -69,7 +84,7 @@ function buildClientTable(bodyEl, clients, keyPrefix) {
 				(c.ip !== cliName(c.ip) && c.ip !== '__ROUTER__') ? c.ip : ''),
 			keyPrefix === 'live' ? fmtBps(c.rx) : fmtBytes(c.rx * 1024),
 			keyPrefix === 'live' ? fmtBps(c.tx) : fmtBytes(c.tx * 1024),
-			keyPrefix === 'live' ? fmtBytes(c.day_rx) + ' / ' + fmtBytes(c.day_tx) : fmtBytes((c.rx + c.tx) * 1024)
+			keyPrefix === 'live' ? cumCell(c) : fmtBytes((c.rx + c.tx) * 1024)
 		]);
 	}
 	while (bodyEl.firstChild) { bodyEl.removeChild(bodyEl.firstChild); }
@@ -398,20 +413,26 @@ return view.extend({
 
 		/* 表头与表体必须在同一个 <table> 内, 否则列宽各算各的, 上下永远对不齐 */
 		var mkTable = function (title, heads, body, rightFrom, titleEl) {
-			return E('div', { 'class': 'cbi-map' }, [
+			var ths = [];
+			var box = E('div', { 'class': 'cbi-map' }, [
 				titleEl || E('h3', {}, title),
 				E('table', { 'class': 'table' }, [
 					E('thead', {}, [
 						E('tr', { 'class': 'tr table-titles' }, heads.map(function (h, i) {
-							return E('th', {
+							var th = E('th', {
 								'class': 'th',
 								'style': (rightFrom != null && i >= rightFrom) ? 'text-align:right' : ''
 							}, h);
+							ths.push(th);
+							return th;
 						}))
 					]),
 					body
 				])
 			]);
+			/* 把表头元素暴露出去: 「今日累计」这列要随统计日期改标题 */
+			box.thEls = ths;
+			return box;
 		};
 
 		/* 统计日期控件: 全部（按天聚合） / 指定某日（按小时聚合，日历选择） */
@@ -441,6 +462,10 @@ return view.extend({
 		var hoursTitle = E('h3', {}, '全屋分时段');
 		var histTitle = E('h3', {}, '客户端累计');
 		var historyDate = '';
+		var lastLiveClients = [];   /* 最近一次实时快照, 切日期时用它立刻重画 */
+
+		var liveTable = mkTable('客户端实时速率',
+			['客户端', 'IP', '↓ 速率', '↑ 速率', '今日累计 ↓/↑'], liveBody, 2);
 
 		var root = E('div', {}, [
 			E('h2', {}, '实时流量（按客户端）'),
@@ -454,7 +479,7 @@ return view.extend({
 			liveChart.box,
 			barChart.box,
 			controls,
-			mkTable('客户端实时速率', ['客户端', 'IP', '↓ 速率', '↑ 速率', '今日累计 ↓/↑'], liveBody, 2),
+			liveTable,
 			mkTable('客户端累计', ['客户端', 'IP', '↓ 累计', '↑ 累计', '合计'], histBody, 2, histTitle),
 			mkTable('全屋分时段', ['时段', '↓ 流量', '↑ 流量'], hoursBody, 1, hoursTitle)
 		]);
@@ -501,6 +526,7 @@ return view.extend({
 					day_rx: (d.router && d.router.day_rx) || 0,
 					day_tx: (d.router && d.router.day_tx) || 0
 				});
+				lastLiveClients = cl;
 				buildClientTable(liveBody, cl, 'live');
 			}).catch(function () { });
 		}, 2);
@@ -514,6 +540,27 @@ return view.extend({
 				buildClientTable(histBody, d.clients || [], 'hist');
 				histTitle.textContent = historyDate ? ('客户端累计 ' + historyDate)
 				                                    : '客户端累计（全部保留期）';
+
+				/* 某日模式: 实时表第 5 列改吃该日的累计(history 的单位是 KiB)。
+				   采集器给的 day_rx 永远是"今天", 不跟着日历走, 直接显示会让用户以为选日期没生效 */
+				dayCumOn = !!historyDate;
+				dayCum = {};
+				if (dayCumOn) {
+					var dc = d.clients || [];
+					for (var ci = 0; ci < dc.length; ci++) {
+						dayCum[dc[ci].ip] = {
+							'rx': (Number(dc[ci].rx) || 0) * 1024,
+							'tx': (Number(dc[ci].tx) || 0) * 1024
+						};
+					}
+				}
+				if (liveTable.thEls && liveTable.thEls[4]) {
+					liveTable.thEls[4].textContent = dayCumOn
+						? (historyDate.substring(5) + ' 累计 ↓/↑')
+						: '今日累计 ↓/↑';
+				}
+				/* 立刻重画一次实时表, 别让用户等下一个 2 秒 tick 才看到新口径 */
+				if (lastLiveClients.length) buildClientTable(liveBody, lastLiveClients, 'live');
 				/* 单日 -> 每小时一格; 全部 -> 每天一格 */
 				var buckets = {}, order = [];
 				var hours = d.hours || [];

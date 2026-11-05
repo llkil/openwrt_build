@@ -132,6 +132,7 @@ while :; do
         TODAY=$D
         DAY="$RUN/day_$D.txt"
         : > "$DAY"
+        : > "$RUN/flush_acc.txt"
         LASTFLUSH=0
     fi
     HM=$(date +%H:%M)
@@ -192,6 +193,16 @@ while :; do
     ' "$DAY" "$RUN/delta.txt" 2>/dev/null
     [ -f "$DAY.new" ] && mv "$DAY.new" "$DAY"
 
+    # 4b) 增量并入分钟累加器, 供 CSV 落盘。
+    #     直接拿 delta.txt 写 CSV 只会记下每 60 秒里的最后 2 秒, 漏计约 30 倍
+    [ -f "$RUN/flush_acc.txt" ] || : > "$RUN/flush_acc.txt"
+    awk '
+    FILENAME == ARGV[1] { R[$1] += $2; T[$1] += $3; next }
+    { R[$1] += $2; T[$1] += $3 }
+    END { for (k in R) print k, R[k] + 0, T[k] + 0 }
+    ' "$RUN/flush_acc.txt" "$RUN/delta.txt" > "$RUN/flush_acc.new" 2>/dev/null
+    [ -f "$RUN/flush_acc.new" ] && mv "$RUN/flush_acc.new" "$RUN/flush_acc.txt"
+
     # 5) CPU 使用率 (/proc/stat 差值) 与实时频率
     CPUP="$RUN/stat_prev.txt"
     STATC=$(awk '/^cpu /{ print $2+$3+$4+$5+$6+$7+$8, $5+$6; exit }' /proc/stat 2>/dev/null)
@@ -251,12 +262,13 @@ while :; do
         fi
     fi
 
-    # 7) 定期落盘历史 (KiB)
+    # 7) 定期落盘历史 (KiB): 写整分钟的累加值, 写完清空累加器
     if [ $((NOW - LASTFLUSH)) -ge $FLUSH ]; then
         LASTFLUSH=$NOW
         awk -F' ' -v hm="$HM" '
         $1 != "__TOTAL__" && ($2 > 0 || $3 > 0) { printf "%s,%s,%.1f,%.1f\n", hm, $1, $3 / 1024, $2 / 1024 }
-        ' "$RUN/delta.txt" >> "$DATA/$TODAY.csv"
+        ' "$RUN/flush_acc.txt" >> "$DATA/$TODAY.csv"
+        : > "$RUN/flush_acc.txt"
     fi
 
     # 8) 每 6 小时清理过期数据 / 超限收缩
