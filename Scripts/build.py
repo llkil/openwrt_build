@@ -496,7 +496,7 @@ def integrate(lock, tree):
     shutil.copytree(ROOT / "Scripts/Files/flowmon", target)
     # 仓库里已是 100755，这里再兜一次底，避免宿主 umask 吃掉执行位
     for relative in ("root/usr/bin/flowmon-loop", "root/usr/libexec/flowmon-panel",
-                     "root/etc/init.d/flowmon"):
+                     "root/usr/libexec/flowmon-path", "root/etc/init.d/flowmon"):
         (target / relative).chmod(0o755)
     # Maintain the old Rust build fix without unrelated theme/download hacks.
     for path in (tree / "feeds/packages").glob("*/rust/Makefile"):

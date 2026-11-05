@@ -2,7 +2,8 @@
 # flowmon-loop — 基于 nft 钩子层计数器的按客户端流量采集
 # 说明: conntrack 字节计数在本机 (PassWall2 TPROXY + EasyTier 多层 netfilter) 存在
 #       幻影跳变 (实测 conntrack +9.9MB vs 钩子层 50KB), 故改用 nft per-element counter。
-# 实时: /tmp/flowmon/live.json  历史: /overlay/flowmon/YYYY-MM-DD.csv (保留天数见 uci flowmon)
+# 实时: /tmp/flowmon/live.json  历史: <DATA>/YYYY-MM-DD.csv (保留天数见 uci flowmon)
+#       <DATA> 由 flowmon-path 决定: U 盘 > /overlay > tmpfs
 
 INTERVAL=2
 FLUSH=60
@@ -41,10 +42,25 @@ fi
 [ -n "$WANIF" ] || WANIF="pppoe-wan"
 
 mkdir -p "$RUN"
-# 历史落持久分区; 不可写时退化到内存, 只丢历史, 实时统计不受影响。
+# 历史目录: U 盘优先 → /overlay → tmpfs, 由 flowmon-path 统一判定 (panel 用同一套规则)
+DATA=$(/usr/libexec/flowmon-path 2>/dev/null)
+[ -n "$DATA" ] || DATA="$RUN/data"
 mkdir -p "$DATA" 2>/dev/null
-[ -d "$DATA" ] && [ -w "$DATA" ] || DATA="$RUN/data"
-mkdir -p "$DATA"
+
+# 首次切到 U 盘时把 overlay 上已有的历史带过去, 免得界面里历史凭空少几天
+if [ "$DATA" != "/overlay/flowmon" ]; then
+    for _f in /overlay/flowmon/*.csv; do
+        [ -f "$_f" ] || continue
+        _b=${_f##*/}
+        [ -f "$DATA/$_b" ] || cp -f "$_f" "$DATA/$_b" 2>/dev/null
+    done
+fi
+
+# 当日累计快照: 只有历史目录落到 U 盘时才启用。
+# 内部闪存上每 15 秒写一次等于白磨 NAND, 那种情况退回 CSV 重建 (60 秒粒度)。
+SNAPDIR=""
+case "$DATA" in /mnt/sda1/*) SNAPDIR="$DATA" ;; esac
+SNAP_INT=15
 
 # ---- nft 计数表 (独立于 fw4, 不受防火墙重载影响) ----
 NFTCONF="$RUN/nft.conf"
@@ -95,6 +111,11 @@ TODAY=$(date +%Y-%m-%d)
 # 到期删除 + 容量上限兜底（文件名 YYYY-MM-DD.csv，字典序即时间序）
 cleanup_history() {
     find "$DATA" -name '*.csv' -mtime +"$KEEP_DAYS" -delete 2>/dev/null
+    # 容量上限只为保护内部闪存; U 盘有几十 GB 余量, 按 max_mb 卡会白删历史
+    case "$DATA" in
+        /overlay/*|"$RUN"/*) ;;
+        *) return 0 ;;
+    esac
     while :; do
         N=$(ls -1 "$DATA"/*.csv 2>/dev/null | wc -l)
         [ "${N:-0}" -le 2 ] && break
@@ -115,10 +136,11 @@ WTXP="$RUN/wtx.txt"
 WRXP="$RUN/wrx.txt"
 [ -f "$WTXP" ] || echo 0 > "$WTXP"
 [ -f "$WRXP" ] || echo 0 > "$WRXP"
-# 当日累计 day_*.txt 在 tmpfs, 重启即清空; 而 CSV 每分钟落在 overlay 上。
-# 从当天 CSV 逐行累加还原 (CSV 单位 KiB → 字节), 零额外闪存写入, 粒度即 CSV 的 60 秒。
-# 只在 /tmp 没有有效数据时才回填, 避免 service restart 把同一批流量算两遍。
-# __TOTAL__ 由各行相加得到: 原值本就等于「各客户端增量 + __ROUTER__ 增量」, 二者等价。
+# 当日累计 day_*.txt 在 tmpfs, 重启即清空。恢复优先级:
+#   1) U 盘快照 (15 秒粒度; 仅当历史目录落在 U 盘时才写, 不拿内部闪存换精度)
+#   2) 当天 CSV 逐行累加 (60 秒粒度, 零额外写入)
+#   3) 归零
+# 守卫 ! -s "$DAY": 仅当 tmpfs 无有效数据时才回填, 避免 service restart 把同一批流量算两遍。
 restore_day() {
     awk -F, '
     $2 != "" && $2 != "__TOTAL__" {
@@ -137,13 +159,32 @@ restore_day() {
     }' "$1" > "$2" 2>/dev/null
 }
 
+# 快照首行是日期, 跨天后旧快照作废, 不能拿来冒充今天
+restore_snapshot() {
+    [ -s "$1" ] || return 1
+    [ "$(head -n1 "$1" 2>/dev/null)" = "# $TODAY" ] || return 1
+    tail -n +2 "$1" > "$2" 2>/dev/null
+    [ -s "$2" ]
+}
+
+write_snapshot() {
+    [ -n "$SNAPDIR" ] && [ -s "$DAY" ] || return 0
+    printf '# %s\n' "$TODAY" > "$SNAPDIR/day-snap.tmp" 2>/dev/null &&
+        cat "$DAY" >> "$SNAPDIR/day-snap.tmp" 2>/dev/null &&
+        mv -f "$SNAPDIR/day-snap.tmp" "$SNAPDIR/day-snap.txt" 2>/dev/null
+}
+
 DAY="$RUN/day_$TODAY.txt"
+if [ ! -s "$DAY" ] && restore_snapshot "$SNAPDIR/day-snap.txt" "$DAY"; then
+    logger -t flowmon "day counters restored from snapshot ($TODAY)"
+fi
 if [ ! -s "$DAY" ] && [ -s "$DATA/$TODAY.csv" ]; then
     restore_day "$DATA/$TODAY.csv" "$DAY"
-    logger -t flowmon "restored day counters from CSV ($TODAY)"
+    logger -t flowmon "day counters rebuilt from CSV ($TODAY)"
 fi
 [ -f "$DAY" ] || : > "$DAY"
 LASTFLUSH=0
+LASTSNAP=0
 PREV_TS=$(date +%s)
 
 while :; do
@@ -286,6 +327,12 @@ while :; do
         if [ "${SPL:-0}" -gt 320 ]; then
             tail -n 300 "$RUN/spark.txt" > "$RUN/spark.tmp" 2>/dev/null && mv "$RUN/spark.tmp" "$RUN/spark.txt"
         fi
+    fi
+
+    # 6c) 当日累计快照到 U 盘 (15 秒粒度, 供重启恢复; 非 U 盘模式自动跳过)
+    if [ -n "$SNAPDIR" ] && [ $((NOW - LASTSNAP)) -ge "$SNAP_INT" ]; then
+        LASTSNAP=$NOW
+        write_snapshot
     fi
 
     # 7) 定期落盘历史 (KiB): 写整分钟的累加值, 写完清空累加器

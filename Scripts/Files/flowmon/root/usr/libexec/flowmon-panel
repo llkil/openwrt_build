@@ -7,12 +7,14 @@
 #   setretention N   修改保留天数并重启采集器（N ∈ 1/2/3/7/14/30/60/90）
 
 RUN=/tmp/flowmon
-DATA=/overlay/flowmon
+# 历史目录必须与采集器同源, 否则界面读不到数据
+DATA=$(/usr/libexec/flowmon-path 2>/dev/null)
+[ -n "$DATA" ] || DATA=/overlay/flowmon
 
 retention_days() {
     R=$(uci -q get flowmon.settings.retention_days 2>/dev/null)
     case "$R" in
-        1|2|3|7|14|30|60|90) echo "$R" ;;
+        1|2|3|7|14|30|60|90|180|365) echo "$R" ;;
         *) echo 2 ;;
     esac
 }
@@ -86,7 +88,12 @@ history)
 dates)
     R=$(retention_days)
     USED=$(du -sk "$DATA" 2>/dev/null | awk '{print $1}')
-    printf '{"retention":%s,"used_kb":%s,"days":[' "$R" "${USED:-0}"
+    case "$DATA" in
+        /mnt/sda1/*) ST=usb ;;
+        /tmp/*) ST=tmpfs ;;
+        *) ST=flash ;;
+    esac
+    printf '{"retention":%s,"used_kb":%s,"storage":"%s","days":[' "$R" "${USED:-0}" "$ST"
     FIRST=1
     for f in "$DATA"/*.csv; do
         [ -f "$f" ] || continue
@@ -102,7 +109,7 @@ dates)
 setretention)
     N="$2"
     case "$N" in
-        1|2|3|7|14|30|60|90) ;;
+        1|2|3|7|14|30|60|90|180|365) ;;
         *) echo '{"error":"unsupported retention"}'; exit 1 ;;
     esac
     uci -q set flowmon.settings.retention_days="$N"

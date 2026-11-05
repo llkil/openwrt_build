@@ -1,0 +1,35 @@
+#!/bin/sh
+# flowmon-path — 解析历史数据目录, 供 flowmon-loop 与 flowmon-panel 共用。
+# 优先外部 U 盘 (容量大、可更换、不磨内部闪存), 其次 /overlay, 最后 tmpfs。
+#
+# 为何要写测试而不是只看 [ -w ]: U 盘被直接拔掉后挂载点会残留,
+# access() 仍可能返回成功, 之后的写入静默失败。只有真写一次才可靠。
+# 反过来, overlay 只做 [ -w ] 判定, 免得这个高频调用自己去磨闪存。
+
+USB=/mnt/sda1/flowmon
+OVL=/overlay/flowmon
+RUN=/tmp/flowmon
+
+for d in "$USB" "$OVL" "$RUN/data"; do
+    case "$d" in
+        /mnt/sda1/*)
+            # 目录可能是上次挂载残留, 必须以 /proc/mounts 为准
+            grep -qs " /mnt/sda1 " /proc/mounts || continue
+            mkdir -p "$d" 2>/dev/null || continue
+            if ( : > "$d/.wtest" ) 2>/dev/null; then
+                rm -f "$d/.wtest" 2>/dev/null
+                echo "$d"
+                exit 0
+            fi
+            ;;
+        *)
+            mkdir -p "$d" 2>/dev/null || continue
+            if [ -w "$d" ]; then
+                echo "$d"
+                exit 0
+            fi
+            ;;
+    esac
+done
+
+echo "$RUN/data"

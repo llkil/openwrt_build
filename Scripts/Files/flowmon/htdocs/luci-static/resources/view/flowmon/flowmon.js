@@ -445,11 +445,11 @@ return view.extend({
 			'type': 'date',
 			'style': 'width:auto;min-width:11em;display:none'
 		});
-		var keepSel = E('select', { 'class': 'cbi-input-select' }, [2, 7, 14, 30].map(function (n) {
+		var keepSel = E('select', { 'class': 'cbi-input-select' }, [7, 14, 30, 90, 180, 365].map(function (n) {
 			return E('option', { 'value': String(n) }, n + ' 天');
 		}));
 		var usageNote = E('span', { 'style': 'color:#777;font-size:.9em' }, '');
-		var rangesNote = E('span', { 'style': 'color:#777;font-size:.9em' }, '历史数据保留 2 天');
+		var rangesNote = E('span', { 'style': 'color:#777;font-size:.9em' }, '历史数据保留 30 天');
 
 		var controls = E('div', {
 			'style': 'display:flex;gap:.6em;align-items:center;flex-wrap:wrap;margin-bottom:1em'
@@ -624,10 +624,13 @@ return view.extend({
 				}
 				if (historyDate) historyDate = dateInp.value;
 
-				/* 保留天数可能被 SSH 改成 1/3/60/90 这类非预设值，重建时补进去，
+				/* 保留上限取决于历史落在哪：U 盘几十 GB 随便留；
+				   内部闪存只剩 16 MB，给它 365 天是画饼，最后会被容量上限悄悄删掉。
+				   当前值可能被 SSH 改成非预设值（1/3/60 之类），重建时补进去，
 				   否则 <select> 会静默显示成第一个选项，误导用户 */
+				var onUsb = (d.storage === 'usb');
 				while (keepSel.firstChild) keepSel.removeChild(keepSel.firstChild);
-				var keepOpts = [2, 7, 14, 30];
+				var keepOpts = onUsb ? [7, 14, 30, 90, 180, 365] : [1, 2, 3, 7, 14, 30];
 				if (keepOpts.indexOf(cur) < 0) keepOpts.push(cur);
 				keepOpts.sort(function (a, b) { return a - b; });
 				for (var q = 0; q < keepOpts.length; q++) {
@@ -635,7 +638,8 @@ return view.extend({
 				}
 				keepSel.value = String(cur);
 				rangesNote.textContent = '历史数据保留 ' + cur + ' 天';
-				usageNote.textContent = d.used_kb ? '· 已占用 ' + fmtBytes(d.used_kb * 1024) : '';
+				var whereTxt = onUsb ? 'U 盘' : (d.storage === 'tmpfs' ? '内存（重启丢失）' : '内部闪存');
+				usageNote.textContent = (d.used_kb ? '· 已占用 ' + fmtBytes(d.used_kb * 1024) : '') + ' · ' + whereTxt;
 			}).catch(function () { });
 		};
 
