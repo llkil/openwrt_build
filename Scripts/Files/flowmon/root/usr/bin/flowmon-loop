@@ -2,7 +2,7 @@
 # flowmon-loop — 基于 nft 钩子层计数器的按客户端流量采集
 # 说明: conntrack 字节计数在本机 (PassWall2 TPROXY + EasyTier 多层 netfilter) 存在
 #       幻影跳变 (实测 conntrack +9.9MB vs 钩子层 50KB), 故改用 nft per-element counter。
-# 实时: /tmp/flowmon/live.json  历史: /overlay/flowmon/YYYY-MM-DD.csv (保留 2 天)
+# 实时: /tmp/flowmon/live.json  历史: /overlay/flowmon/YYYY-MM-DD.csv (保留天数见 uci flowmon)
 
 INTERVAL=2
 FLUSH=60
@@ -115,7 +115,33 @@ WTXP="$RUN/wtx.txt"
 WRXP="$RUN/wrx.txt"
 [ -f "$WTXP" ] || echo 0 > "$WTXP"
 [ -f "$WRXP" ] || echo 0 > "$WRXP"
+# 当日累计 day_*.txt 在 tmpfs, 重启即清空; 而 CSV 每分钟落在 overlay 上。
+# 从当天 CSV 逐行累加还原 (CSV 单位 KiB → 字节), 零额外闪存写入, 粒度即 CSV 的 60 秒。
+# 只在 /tmp 没有有效数据时才回填, 避免 service restart 把同一批流量算两遍。
+# __TOTAL__ 由各行相加得到: 原值本就等于「各客户端增量 + __ROUTER__ 增量」, 二者等价。
+restore_day() {
+    awk -F, '
+    $2 != "" && $2 != "__TOTAL__" {
+        R[$2] += $3; T[$2] += $4
+        next
+    }
+    END {
+        trx = 0; ttx = 0
+        for (k in R) {
+            rx = int(R[k] * 1024 + 0.5)
+            tx = int(T[k] * 1024 + 0.5)
+            printf "%s %d %d\n", k, rx, tx
+            trx += rx; ttx += tx
+        }
+        printf "__TOTAL__ %d %d\n", trx, ttx
+    }' "$1" > "$2" 2>/dev/null
+}
+
 DAY="$RUN/day_$TODAY.txt"
+if [ ! -s "$DAY" ] && [ -s "$DATA/$TODAY.csv" ]; then
+    restore_day "$DATA/$TODAY.csv" "$DAY"
+    logger -t flowmon "restored day counters from CSV ($TODAY)"
+fi
 [ -f "$DAY" ] || : > "$DAY"
 LASTFLUSH=0
 PREV_TS=$(date +%s)
